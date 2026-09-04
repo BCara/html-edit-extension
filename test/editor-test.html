@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Quick Edit — editor tests</title>
+<!--
+  This page IS the document under test. It fetches its own source, builds the
+  offset map over itself and runs real edit mode on it, which is exactly what
+  the extension does to a local file. Anything marked data-quick-edit-ui — the
+  results output below — is excluded from the map, so the test harness never
+  becomes editable text.
+-->
+<style data-quick-edit-ui>
+  body { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; }
+  h1 { font: 600 15px system-ui, sans-serif; margin: 0 0 1rem; }
+  #doc { max-width: 40rem; font-family: Georgia, serif; }
+  #out { white-space: pre-wrap; margin-top: 1.5rem; }
+  .pass { color: #15803d; }
+  .fail { color: #b91c1c; font-weight: 700; }
+  .head { color: #4f46e5; font-weight: 700; display: block; margin-top: .9rem; }
+  #summary { margin-top: 1.2rem; padding-top: .8rem; border-top: 1px solid #ddd; font-weight: 700; }
+</style>
+
+<section id="doc">
+  <p id="p1">Hello <strong>bold <em>and italic</em></strong> world</p>
+  <p id="p2">Ampersands: Smith&nbsp;&amp;&nbsp;Sons, 5 &lt; 6, &#39;quoted&#39;</p>
+  <p id="p3">A plain paragraph to type into.</p>
+  <p id="p4">Another <span class="x">paragraph</span> with an inline span.</p>
+  <p><a href="does-not-exist.html" id="link">A link that must not navigate</a></p>
+</section>
+
+<div data-quick-edit-ui>
+  <h1>Quick Edit — editor tests</h1>
+  <div id="out">Running…</div>
+  <div id="summary"></div>
+</div>
+
+<script src="report.js"></script>
+<script src="../src/lib/tokenizer.js"></script>
+<script src="../src/lib/mapping.js"></script>
+<script src="../src/lib/splice.js"></script>
+<script src="../src/lib/islands.js"></script>
+<script src="../src/editor.js"></script>
+<script src="editor-harness.js"></script>

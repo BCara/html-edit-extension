@@ -1,0 +1,63 @@
+{
+  // Quick Edit — edit the visible text of a local HTML file, save it with the
+  // markup untouched.
+  //
+  // Chrome's manifest parser accepts // comments; they are stripped before the
+  // JSON is read. Every permission below is here because a specific feature
+  // cannot work without it — see the justification on each one.
+  "manifest_version": 3,
+  "name": "Quick Edit",
+  "version": "0.1.0",
+  "description": "Edit the visible text of a local HTML file in place and save it without disturbing the markup.",
+
+  "permissions": [
+    // activeTab — granted only for the tab whose toolbar icon the user clicked,
+    // and only until they navigate away. This is what lets the content script
+    // read the current file:// document. Chosen instead of a host permission
+    // (e.g. "file:///*") so the extension has no standing access to anything:
+    // no click, no access.
+    "activeTab",
+
+    // scripting — the content script is injected on demand by chrome.scripting
+    // when the user clicks the icon, rather than being declared in
+    // "content_scripts" and auto-injected into every local file they open.
+    // Same reasoning as above: nothing runs unless asked.
+    "scripting",
+
+    // downloads — Chrome cannot write back to a file:// path, so saving is a
+    // download. Used with saveAs:true so the OS file dialog always opens and
+    // the user chooses the destination (including, deliberately, the original
+    // file). No download is ever started without the user pressing Save.
+    "downloads"
+  ],
+
+  // No "host_permissions" on purpose: activeTab covers the one tab in play.
+  // No "storage": nothing is persisted anywhere.
+  // No network permissions: the extension makes no network requests at all.
+  //
+  // Reading local files additionally requires the user to tick "Allow access to
+  // file URLs" on chrome://extensions. That is a user-granted toggle, not a
+  // manifest permission; the popup detects when it is off and explains it.
+
+  "background": {
+    "service_worker": "src/background.js"
+  },
+
+  "action": {
+    "default_title": "Quick Edit",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

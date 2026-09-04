@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Quick Edit</title>
+<link rel="stylesheet" href="popup.css">
+<div class="wrap">
+  <h1>Quick Edit</h1>
+
+  <div id="state" class="state">Checking this tab…</div>
+
+  <div id="actions" class="actions" hidden>
+    <button id="toggle" class="primary"></button>
+    <button id="save" hidden>Save</button>
+  </div>
+
+  <div id="fileaccess" class="actions" hidden>
+    <button id="open-extensions">Open extension settings</button>
+  </div>
+
+  <details id="detail" hidden>
+    <summary>What Quick Edit found</summary>
+    <div id="detail-body"></div>
+  </details>
+
+  <p class="foot" id="foot"></p>
+</div>
+<script src="popup.js"></script>

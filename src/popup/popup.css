@@ -1,0 +1,80 @@
+:root {
+  color-scheme: light dark;
+  --fg: #16181d;
+  --muted: #6b7280;
+  --line: #e3e5ea;
+  --bg: #ffffff;
+  --accent: #5b52f0;
+  --accent-fg: #ffffff;
+  --warn: #9a3412;
+  --warn-bg: #fff7ed;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --fg: #e8eaee; --muted: #9aa1ad; --line: #2c3038; --bg: #1b1d22;
+    --accent: #6d64ff; --warn: #fdba74; --warn-bg: #2a1f14;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  width: 320px;
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+.wrap { padding: 14px 16px 12px; }
+h1 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+.state { margin-bottom: 11px; }
+.state b { font-weight: 600; }
+.state .sub { color: var(--muted); }
+.state.warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+  padding: 9px 10px;
+  border-radius: 6px;
+}
+.state.warn ol { margin: 6px 0 0; padding-left: 18px; }
+.state.warn li { margin: 2px 0; }
+.actions { display: flex; gap: 8px; margin-bottom: 11px; }
+button {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+button.primary:hover:not(:disabled) { filter: brightness(1.08); color: var(--accent-fg); }
+button:disabled { opacity: .5; cursor: default; }
+details {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+  color: var(--muted);
+}
+summary { cursor: pointer; }
+details dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; margin: 8px 0 0; }
+details dt { color: var(--muted); }
+details dd { margin: 0; font-variant-numeric: tabular-nums; color: var(--fg); }
+details .sub { margin: 9px 0 2px; color: var(--fg); }
+.foot {
+  margin: 11px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+}
+.foot:empty { display: none; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
