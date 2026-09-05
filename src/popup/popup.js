@@ -100,6 +100,15 @@ function renderProblem(res) {
   detailEl.hidden = true;
   footEl.textContent = '';
 
+  if (res.code === 'version-skew') {
+    show('<b>Quick Edit needs reloading.</b>' +
+         '<ol><li>Open the extension settings below</li>' +
+         '<li>Press the <b>reload</b> arrow on the Quick Edit card</li>' +
+         '<li>Reload this page</li></ol>', 'warn');
+    fileAccessEl.hidden = false;
+    return;
+  }
+
   if (res.code === 'cancelled') {
     show('No file chosen, so there is nothing to edit yet. ' +
          'Open this popup again to retry.');

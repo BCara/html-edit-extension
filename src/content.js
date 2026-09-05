@@ -14,8 +14,48 @@
 (function () {
   'use strict';
 
-  if (window.__quickEditContentLoaded) return;
+  /*
+   * Version skew guard.
+   *
+   * Chrome reads content-script files from disk at injection time, but the
+   * service worker's list of which files to inject is baked into the worker.
+   * Update the folder without reloading the extension and you get new files
+   * injected by an old list — some modules simply never arrive, and the first
+   * symptom is a TypeError on whichever global is missing. Check up front and
+   * say what actually needs doing.
+   */
+  var VERSION = '0.1.1';
+  var REQUIRED = [
+    'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
+    'QuickEditIslands', 'QuickEditPrompt', 'QuickEditEditor',
+  ];
+
+  function missingModules() {
+    return REQUIRED.filter(function (name) { return !window[name]; });
+  }
+
+  var SKEW_MESSAGE =
+    'Quick Edit is out of step with itself. Open chrome://extensions, press ' +
+    'the reload arrow on the Quick Edit card, then reload this page.';
+
+  // A previous version left its globals in this world. Re-running would not
+  // help — the stale modules are already loaded — so ask for a page reload.
+  if (window.__quickEditContentLoaded) {
+    if (window.__quickEditVersion !== VERSION) {
+      console.warn('[Quick Edit] version ' + VERSION + ' was injected over ' +
+                   window.__quickEditVersion + '. ' + SKEW_MESSAGE);
+      window.__quickEditSkew = SKEW_MESSAGE;
+    }
+    return;
+  }
   window.__quickEditContentLoaded = true;
+  window.__quickEditVersion = VERSION;
+
+  var missing = missingModules();
+  if (missing.length) {
+    console.error('[Quick Edit] these modules were never injected: ' +
+                  missing.join(', ') + '. ' + SKEW_MESSAGE);
+  }
 
   var Editor = window.QuickEditEditor;
   var Prompt = window.QuickEditPrompt;
@@ -224,6 +264,14 @@
     if (!msg || typeof msg.type !== 'string') return;
     var handler = HANDLERS[msg.type];
     if (!handler) return;
+
+    // Answer skew with an explanation rather than letting it surface as a
+    // TypeError from whichever module happens to be missing.
+    var gone = missingModules();
+    if (gone.length && msg.type !== 'quickEdit:ping') {
+      sendResponse({ ok: false, code: 'version-skew', message: SKEW_MESSAGE, missing: gone });
+      return true;
+    }
 
     handler(msg).then(sendResponse).catch(function (err) {
       var message = String(err && err.message || err);
