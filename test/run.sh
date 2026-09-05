@@ -31,7 +31,10 @@ fi
 # --allow-file-access-from-files; file-read-test.html deliberately does NOT,
 # because it is checking what a normal browser refuses to do.
 run_page() {
-  local page="$1" title="$2" extra="${3:-}" dom="$WORK/$(basename "$page").dom.html"
+  local page="$1"
+  local title="$2"
+  local extra="${3:-}"
+  local dom="$WORK/$(basename "$page").dom.html"
 
   echo
   echo "== headless Chrome: $title =="

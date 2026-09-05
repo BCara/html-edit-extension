@@ -26,6 +26,7 @@ const INJECT_FILES = [
   'src/lib/mapping.js',
   'src/lib/splice.js',
   'src/lib/islands.js',
+  'src/lib/blocks.js',
   'src/lib/prompt.js',
   'src/editor.js',
   'src/content.js',

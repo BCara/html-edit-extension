@@ -14,6 +14,16 @@
  * "where does the text live", and all we need from the DOM is "which text node
  * is which". mapping.js then pairs them up and *verifies* every pair.
  *
+ * TAGS
+ * ----
+ * scan() also records every start and end tag it walks past, as {start, end,
+ * name, isEnd}. Nothing is inferred from them here — no tree, no nesting, no
+ * implied elements. They are raw positions, which mapping.js pairs with the
+ * real elements the browser built, the same way text spans are paired with text
+ * nodes. Knowing where an element's tags sit in the file is what makes it
+ * possible to INSERT a sibling: an insertion is a zero-length splice at the
+ * offset just past a closing tag.
+ *
  * WHAT COUNTS AS A SPAN
  * ---------------------
  * Every text run is emitted, including whitespace-only runs and the contents of
@@ -114,7 +124,7 @@
         p = q;
       }
     }
-    return { end: p, name: name, isEnd: isEnd };
+    return { start: i, end: p, name: name, isEnd: isEnd };
   }
 
   // Case-insensitive check for a tag name at `at`, requiring a proper terminator
@@ -140,7 +150,7 @@
   }
 
   /*
-   * tokenize(source) -> [ span, ... ] in source order.
+   * scan(source) -> { spans, tags }, both in source order.
    *
    * span = {
    *   start, end   character offsets into `source`; source.slice(start,end) === raw
@@ -149,9 +159,16 @@
    *   eaten        newline the parser discarded just before this span, if any;
    *                it lives *outside* [start,end) and is never spliced
    * }
+   *
+   * tag = {
+   *   start, end   character offsets; source.slice(start,end) is the whole tag
+   *   name         lower-cased tag name
+   *   isEnd        true for </p>, false for <p>
+   * }
    */
-  function tokenize(source) {
+  function scan(source) {
     var spans = [];
+    var tags = [];
     var len = source.length;
     var i = 0;
     var textStart = 0;
@@ -216,6 +233,7 @@
         flushText(i);
         if (!isAlpha(source[i + 2])) { skipTo(i + 2); continue; } // bogus comment
         var endTag = readTag(source, i);
+        tags.push(endTag);
         i = endTag.end;
         textStart = i;
         continue;
@@ -224,6 +242,7 @@
       if (isAlpha(next)) {
         flushText(i);
         var tag = readTag(source, i);
+        tags.push(tag);
         i = tag.end;
         textStart = i;
         var name = tag.name;
@@ -253,8 +272,11 @@
       i++;
     }
     flushText(len);
-    return spans;
+    return { spans: spans, tags: tags };
   }
 
-  root.QuickEditTokenizer = { tokenize: tokenize, readTag: readTag };
+  // The text spans on their own — by far the most common thing to want.
+  function tokenize(source) { return scan(source).spans; }
+
+  root.QuickEditTokenizer = { scan: scan, tokenize: tokenize, readTag: readTag };
 })(typeof self !== 'undefined' ? self : globalThis);

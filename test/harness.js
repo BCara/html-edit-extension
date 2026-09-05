@@ -193,6 +193,55 @@ function commonChecks(fx) {
 
   ok(res.edits.length > 0, 'the fixture has at least one editable region');
 
+  // 6. Element boundaries. Where an element was paired with both of its tags,
+  //    the source between them must be exactly that element.
+  {
+    // These get the cheap bounds check only.
+    // <html>, <head> and <body> cannot survive a fragment re-parse, and
+    // <noscript> parses differently again: a <template>'s contents are parsed
+    // with scripting DISABLED, so its children come back as real elements
+    // rather than the single raw-text node a live page produces.
+    const STRUCTURAL = ['html', 'head', 'body', 'noscript'];
+    let paired = 0;
+    const badBounds = [];
+    const badParse = [];
+
+    for (const el of doc.querySelectorAll('*')) {
+      const range = map.elements.get(el);
+      if (!range || !range.startTag || !range.endTag) continue;
+      paired++;
+
+      const name = el.localName;
+      const slice = source.slice(range.startTag.start, range.endTag.end);
+      const label = name + ': ' + JSON.stringify(slice.slice(0, 50));
+
+      if (slice.slice(0, name.length + 1).toLowerCase() !== '<' + name ||
+          slice.slice(-(name.length + 3)).toLowerCase() !== '</' + name + '>') {
+        badBounds.push(label);
+        continue;
+      }
+      if (STRUCTURAL.indexOf(name) !== -1) continue;
+
+      // A <template> parses anything, including table internals that a <body>
+      // context would throw away.
+      const holder = document.createElement('template');
+      holder.innerHTML = slice;
+      const roots = holder.content.children;
+      if (roots.length !== 1 || roots[0].localName !== name ||
+          roots[0].textContent !== el.textContent) {
+        badParse.push(label);
+      }
+    }
+
+    ok(paired > 0, 'elements were paired with both their tags (' + paired + ')');
+    ok(badBounds.length === 0,
+       'each element\'s slice starts and ends with its own tags',
+       badBounds.length + ' wrong, first: ' + badBounds[0]);
+    ok(badParse.length === 0,
+       'and re-parses to exactly that element, with exactly its text',
+       badParse.length + ' wrong, first: ' + badParse[0]);
+  }
+
   return { map, spans, res };
 }
 
@@ -260,6 +309,19 @@ const SPECIFIC = {
 
   'messy.html'(fx) {
     const map = QuickEditMap.build(fx.source, fx.doc);
+
+    // Unclosed <P>: a start tag, no end tag.
+    const firstP = fx.doc.querySelector('p');
+    const pRange = map.elements.get(firstP);
+    ok(!!pRange && !!pRange.startTag, 'an unclosed <P> still has its start tag');
+    eq(pRange && pRange.endTag, null, 'and no end tag, because the file has none');
+
+    // <tbody> is invented by the parser and appears nowhere in the file.
+    const tbody = fx.doc.querySelector('tbody');
+    ok(!!tbody, 'the parser inserted a <tbody>');
+    eq(map.elements.get(tbody), undefined,
+       'an element the parser invented is not paired with any tag');
+
     const texts = map.records.filter((r) => r.editable).map((r) => r.node.data.trim());
     ok(texts.some((t) => t.indexOf('First paragraph') === 0),
        'text in an unclosed <P> is editable');
@@ -399,6 +461,63 @@ const SPECIFIC = {
   },
 };
 
+// --- element boundaries -----------------------------------------------------
+
+function elementChecks() {
+  heading('elements — nesting and same-name elements');
+  {
+    const src = '<!doctype html><body><div id="outer">a<div id="inner">b</div>c</div>' +
+                '<div id="after">d</div>';
+    const doc = parse(src);
+    const map = QuickEditMap.build(src, doc);
+
+    const outer = doc.getElementById('outer');
+    const inner = doc.getElementById('inner');
+    const after = doc.getElementById('after');
+
+    const slice = (el) => {
+      const r = map.elements.get(el);
+      return r && r.startTag && r.endTag ? src.slice(r.startTag.start, r.endTag.end) : null;
+    };
+
+    eq(slice(inner), '<div id="inner">b</div>', 'the inner div gets its own tags');
+    eq(slice(outer), '<div id="outer">a<div id="inner">b</div>c</div>',
+       'the outer div gets the OUTER pair, not the inner one');
+    eq(slice(after), '<div id="after">d</div>', 'the following div is unaffected');
+  }
+
+  heading('elements — void and self-closed');
+  {
+    const src = '<!doctype html><body><p>a<br>b</p><img src="x.png"><p>c</p>';
+    const doc = parse(src);
+    const map = QuickEditMap.build(src, doc);
+
+    const br = doc.querySelector('br');
+    const brRange = map.elements.get(br);
+    ok(!!brRange && !!brRange.startTag, '<br> is paired with its start tag');
+    eq(brRange && brRange.endTag, null, 'and has no end tag to find');
+
+    const ps = doc.querySelectorAll('p');
+    eq(src.slice(map.elements.get(ps[1]).startTag.start,
+                 map.elements.get(ps[1]).endTag.end), '<p>c</p>',
+       'the paragraph after a void element still lines up');
+  }
+
+  heading('elements — implied by the parser');
+  {
+    const src = '<!doctype html><html><body><table><tr><td>cell</td></tr></table></body></html>';
+    const doc = parse(src);
+    const map = QuickEditMap.build(src, doc);
+
+    eq(map.elements.get(doc.querySelector('tbody')), undefined,
+       'the invented <tbody> is not paired');
+    const tr = doc.querySelector('tr');
+    eq(src.slice(map.elements.get(tr).startTag.start, map.elements.get(tr).endTag.end),
+       '<tr><td>cell</td></tr>',
+       'and the row inside it still maps correctly');
+  }
+}
+
 // --- islands and write-back -------------------------------------------------
 
 /*
@@ -524,6 +643,13 @@ async function run() {
       tally.fail++;
       line('fail', '  FAIL  could not run fixture — ' + (err && err.message || err));
     }
+  }
+
+  try {
+    elementChecks();
+  } catch (err) {
+    tally.fail++;
+    line('fail', '  FAIL  element checks — ' + (err && err.message || err));
   }
 
   try {

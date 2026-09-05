@@ -28,6 +28,12 @@ function islandFor(selector, which) {
   return islands[which || 0];
 }
 
+// The last run of text in a block — the only place Enter starts a new block.
+function lastIslandFor(selector) {
+  const islands = document.querySelector(selector).querySelectorAll('[data-qe-island]');
+  return islands[islands.length - 1];
+}
+
 function valueOf(island) { return QuickEditIslands.readValue(island); }
 
 function caretTo(island, index) {
@@ -99,6 +105,37 @@ function pasteInto(island, plain, html, index) {
   });
   island.dispatchEvent(ev);
   return ev;
+}
+
+/*
+ * The single contiguous difference between two strings, as
+ * { at, removed, inserted }. Used to show that adding a block REPLACES
+ * NOTHING: `removed` must come back empty.
+ *
+ * Where exactly the insertion "starts" is ambiguous — inserting "\n  <p>x</p>"
+ * in front of "\n  <p id=..." can be split at several points, all reporting the
+ * same bytes rotated. So `inserted` is only used for its length here; what the
+ * markup actually says is asserted against the finished file, where there is
+ * nothing to be ambiguous about.
+ */
+function singleDiff(before, after) {
+  let head = 0;
+  const max = Math.min(before.length, after.length);
+  while (head < max && before[head] === after[head]) head++;
+
+  let tailBefore = before.length;
+  let tailAfter = after.length;
+  while (tailBefore > head && tailAfter > head &&
+         before[tailBefore - 1] === after[tailAfter - 1]) {
+    tailBefore--;
+    tailAfter--;
+  }
+
+  return {
+    at: head,
+    removed: before.slice(head, tailBefore),
+    inserted: after.slice(head, tailAfter),
+  };
 }
 
 // The bytes outside [start, end) must be the original bytes, unchanged.
@@ -334,6 +371,156 @@ async function run() {
        'not one editing wrapper leaked into the file');
     ok(edited.indexOf('contenteditable') === -1,
        'and neither did contenteditable');
+  }
+
+  heading('adding a block');
+  {
+    QuickEditEditor.setActive(true);
+
+    const before = QuickEditEditor.preview();
+    const island = islandFor('#p3');
+    const added = QuickEditEditor.addAfterIsland(island);
+    ok(!!added, 'a block was added');
+
+    const p3 = document.getElementById('p3');
+    const fresh = p3.nextElementSibling;
+    eq(fresh.localName, 'p', 'the new element has the same tag as its neighbour');
+    eq(fresh.textContent, '', 'and starts empty');
+    eq(QuickEditEditor.preview(), before,
+       'an added block with nothing typed into it is not written to the file');
+
+    typeInto(fresh.querySelector('[data-qe-island]'), 'A brand new paragraph.');
+    const after = QuickEditEditor.preview();
+    const diff = singleDiff(before, after);
+
+    eq(diff.removed, '', 'adding a block REPLACES NOTHING — not one byte');
+    eq(diff.inserted.length, '\n  <p>A brand new paragraph.</p>'.length,
+       'and adds exactly the new block, nothing more');
+    ok(after.indexOf('</p>\n  <p>A brand new paragraph.</p>\n  <p id="p4"') !== -1,
+       'which lands between its neighbour and the next block, indented to match');
+    ok(after.indexOf('<p id="p3">') !== -1, 'the block it was added after is untouched');
+  }
+
+  heading('adding — id is dropped, class is kept');
+  {
+    const before = QuickEditEditor.preview();
+    QuickEditEditor.addAfterIsland(islandFor('#p5'));
+    const fresh = document.getElementById('p5').nextElementSibling;
+    typeInto(fresh.querySelector('[data-qe-island]'), 'Copied styling.');
+
+    const afterAdd = QuickEditEditor.preview();
+    eq(singleDiff(before, afterAdd).removed, '', 'still replaces nothing');
+    ok(afterAdd.indexOf('\n  <p class="note">Copied styling.</p>') !== -1,
+       'the class comes along');
+    ok(afterAdd.indexOf('<p class="note">Copied styling.</p>') !== -1 &&
+       afterAdd.indexOf('id="p5">Copied styling') === -1,
+       'the id does not, so it stays unique');
+  }
+
+  heading('adding — inside a list');
+  {
+    const before = QuickEditEditor.preview();
+    const items = document.querySelectorAll('#list li');
+    const first = items[0];
+    QuickEditEditor.addAfterIsland(first.querySelector('[data-qe-island]'));
+
+    const fresh = first.nextElementSibling;
+    eq(fresh.localName, 'li', 'an <li> gets another <li>, not a <p>');
+    typeInto(fresh.querySelector('[data-qe-island]'), 'Inserted item');
+
+    const afterAdd = QuickEditEditor.preview();
+    eq(singleDiff(before, afterAdd).removed, '', 'still replaces nothing');
+    ok(afterAdd.indexOf(
+         '<li>First item</li>\n    <li>Inserted item</li>\n    <li>Second item</li>') !== -1,
+       'and lands between the two existing items, with the list\'s own indent');
+  }
+
+  heading('adding — Enter at the end of a block');
+  {
+    // #p4 is "Another <span>paragraph</span> with an inline span." — three runs
+    // of text. Only the end of the LAST one is the end of the block.
+    const island = lastIslandFor('#p4');
+    const value = valueOf(island);
+    const blocksBefore = document.querySelectorAll('#doc p').length;
+
+    const ev = dispatchBeforeInput(island, 'insertParagraph', value.length);
+    ok(ev.defaultPrevented, 'the browser default is cancelled');
+    eq(document.querySelectorAll('#doc p').length, blocksBefore + 1,
+       'Enter at the end of a block adds a new one');
+    eq(valueOf(island), value, 'and leaves the text it came from alone');
+
+    // The same key at the end of a run that is NOT the end of its block still
+    // breaks the line.
+    const firstRun = islandFor('#p4');
+    const firstValue = valueOf(firstRun);
+    dispatchBeforeInput(firstRun, 'insertParagraph', firstValue.length);
+    eq(valueOf(firstRun), firstValue + BR,
+       'Enter at the end of an inline run mid-block inserts a line break');
+
+    // Mid-text, the same key still breaks the line.
+    const mid = islandFor('#p1');
+    const midValue = valueOf(mid);
+    dispatchBeforeInput(mid, 'insertParagraph', 2);
+    eq(valueOf(mid), midValue.slice(0, 2) + BR + midValue.slice(2),
+       'Enter in the middle of a run still inserts a line break');
+  }
+
+  heading('adding — undo and redo');
+  {
+    const before = QuickEditEditor.preview();
+    const countBefore = document.querySelectorAll('#doc p').length;
+
+    QuickEditEditor.addAfterIsland(islandFor('#p3'));
+    const fresh = document.getElementById('p3').nextElementSibling;
+    typeInto(fresh.querySelector('[data-qe-island]'), 'Temporary.');
+    ok(QuickEditEditor.preview() !== before, 'the addition is in the file');
+
+    QuickEditEditor.undo();            // the typing
+    QuickEditEditor.undo();            // the block itself
+    eq(document.querySelectorAll('#doc p').length, countBefore,
+       'undo takes the added block back out of the page');
+    eq(QuickEditEditor.preview(), before, 'and out of the file');
+
+    QuickEditEditor.redo();            // the block
+    QuickEditEditor.redo();            // the typing
+    eq(document.querySelectorAll('#doc p').length, countBefore + 1,
+       'redo puts it back');
+    ok(QuickEditEditor.preview().indexOf('Temporary.') !== -1, 'with its text');
+
+    QuickEditEditor.undo();
+    QuickEditEditor.undo();
+    eq(QuickEditEditor.preview(), before, 'and undo removes it again');
+  }
+
+  heading('adding — after a block that was itself added');
+  {
+    const before = QuickEditEditor.preview();
+
+    QuickEditEditor.addAfterIsland(islandFor('#p3'));
+    const firstNew = document.getElementById('p3').nextElementSibling;
+    typeInto(firstNew.querySelector('[data-qe-island]'), 'One.');
+
+    QuickEditEditor.addAfterIsland(firstNew.querySelector('[data-qe-island]'));
+    const secondNew = firstNew.nextElementSibling;
+    typeInto(secondNew.querySelector('[data-qe-island]'), 'Two.');
+
+    const afterAdd = QuickEditEditor.preview();
+    eq(singleDiff(before, afterAdd).removed, '', 'two additions at one anchor still replace nothing');
+    ok(afterAdd.indexOf('\n  <p>One.</p>\n  <p>Two.</p>') !== -1,
+       'and come out in the order they appear on the page');
+  }
+
+  heading('adding — the file still parses to what is on screen');
+  {
+    const edited = QuickEditEditor.preview();
+    const reparsed = new DOMParser().parseFromString(edited, 'text/html');
+    ok(edited.indexOf('data-qe-island') === -1, 'no editing wrapper leaked into the file');
+    ok(edited.indexOf('contenteditable') === -1, 'and neither did contenteditable');
+    // The page carries one block per empty addition that the file deliberately
+    // leaves out.
+    eq(reparsed.querySelectorAll('#doc p, #doc li').length,
+       document.querySelectorAll('#doc p, #doc li').length - QuickEditEditor.status().emptyAdded,
+       'the file has the page\'s blocks, less the empty ones it declines to write');
   }
 
   Report.finish();

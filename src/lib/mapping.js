@@ -257,6 +257,91 @@
   function isWhitespaceOnly(text) { return !/\S/.test(text); }
 
   /*
+   * Pair each DOM element with the tags in the source that produced it.
+   *
+   * One recursive walk over the tree the browser already built, consuming tag
+   * tokens in order. Letting the DOM drive is what keeps this small: the
+   * recursion mirrors the nesting, so the awkward cases fall out for free.
+   *
+   *   - Nested elements of the same name need no depth counting, because the
+   *     inner one consumes its own tags inside the outer one's recursion.
+   *   - Implied elements — <html>, <head>, <body>, the <tbody> the parser
+   *     inserts into every table — have no start tag in the source. The next
+   *     token will not match their name, so nothing is consumed and they are
+   *     left unmapped.
+   *   - Unclosed elements — <p>one<p>two — have no end tag, so the token after
+   *     their children does not match either, and endTag stays null.
+   *
+   * Every pairing is then verified against the text map: an element's tags must
+   * actually bracket the source spans of the text inside it. If they do not,
+   * the walk has drifted out of step with the source (foster parenting can do
+   * this) and the element is dropped rather than trusted.
+   *
+   * `spanOf` deliberately holds only the spans of EDITABLE text. Runs of
+   * whitespace are all identical to each other, so when the parser discards
+   * some of them — the whitespace before a doctype, say — the aligner has no
+   * way to tell which "\n" in the source a given "\n" in the DOM came from, and
+   * may pair it with an equally plausible earlier one. That never matters for
+   * editing, because whitespace is never spliced, but it would make an element
+   * look as though its text began before its own start tag.
+   *
+   * Returns a WeakMap of element -> { startTag, endTag }, either of which may be
+   * null. Elements that could not be paired at all are absent.
+   */
+  function mapElements(doc, tags, spanOf) {
+    var byElement = new WeakMap();
+    var cursor = 0;
+
+    function peek() { return cursor < tags.length ? tags[cursor] : null; }
+
+    // Walks `node`'s children, returning the span of source covered by the text
+    // inside them as [min, max], or null when they contain no mapped text.
+    function walk(node) {
+      var min = Infinity;
+      var max = -Infinity;
+
+      for (var child = node.firstChild; child; child = child.nextSibling) {
+        if (child.nodeType === 3) {
+          var span = spanOf.get(child);
+          if (span) {
+            if (span.start < min) min = span.start;
+            if (span.end > max) max = span.end;
+          }
+          continue;
+        }
+        if (child.nodeType !== 1) continue;
+
+        var name = (child.localName || child.nodeName).toLowerCase();
+        var record = { startTag: null, endTag: null };
+
+        var tag = peek();
+        if (tag && !tag.isEnd && tag.name === name) { record.startTag = tag; cursor++; }
+
+        var inner = (name === 'template' && child.content) ? walk(child.content) : walk(child);
+
+        tag = peek();
+        if (tag && tag.isEnd && tag.name === name) { record.endTag = tag; cursor++; }
+
+        // The tags must bracket the text they supposedly contain.
+        if (inner && record.startTag && record.startTag.end > inner[0]) record.startTag = null;
+        if (inner && record.endTag && record.endTag.start < inner[1]) record.endTag = null;
+
+        if (record.startTag || record.endTag) byElement.set(child, record);
+
+        var lo = record.startTag ? record.startTag.start : (inner ? inner[0] : Infinity);
+        var hi = record.endTag ? record.endTag.end : (inner ? inner[1] : -Infinity);
+        if (lo < min) min = lo;
+        if (hi > max) max = hi;
+      }
+
+      return min === Infinity ? null : [min, max];
+    }
+
+    walk(doc);
+    return byElement;
+  }
+
+  /*
    * build(source, doc) -> {
    *   records: [ { node, span, editable, reason } ... ]   // document order
    *   stats:   { spans, nodes, mapped, editable }
@@ -267,7 +352,8 @@
    * spans may ever be spliced.
    */
   function build(source, doc) {
-    var spans = Tokenizer.tokenize(source);
+    var scanned = Tokenizer.scan(source);
+    var spans = scanned.spans;
     var nodes = collectTextNodes(doc);
 
     var spanKeys = spans.map(expectedText);
@@ -324,8 +410,19 @@
       records.push({ node: node, span: span, editable: canEdit, reason: canEdit ? '' : reason });
     }
 
+    // Element boundaries, for inserting new blocks. Built from the text map, so
+    // it inherits its verification — see mapElements for why only editable
+    // spans are trusted here.
+    var spanOf = new WeakMap();
+    for (var j = 0; j < records.length; j++) {
+      if (records[j].editable) spanOf.set(records[j].node, records[j].span);
+    }
+    var elements = mapElements(doc, scanned.tags, spanOf);
+
     return {
       records: records,
+      elements: elements,
+      tags: scanned.tags,
       stats: {
         spans: spans.length, nodes: nodes.length,
         mapped: mapped, editable: editable
@@ -335,6 +432,7 @@
 
   root.QuickEditMap = {
     build: build,
+    mapElements: mapElements,
     collectTextNodes: collectTextNodes,
     expectedText: expectedText,
     normalizeNewlines: normalizeNewlines,

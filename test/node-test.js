@@ -11,13 +11,14 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-for (const f of ['lib/tokenizer.js', 'lib/splice.js', 'lib/islands.js', 'editor.js']) {
+for (const f of ['lib/tokenizer.js', 'lib/splice.js', 'lib/islands.js', 'lib/blocks.js', 'editor.js']) {
   vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'), { filename: f });
 }
 const { tokenize } = globalThis.QuickEditTokenizer;
 const { escapeText, applyEdits, replacementFor } = globalThis.QuickEditSplice;
 const { BR } = globalThis.QuickEditIslands;
 const { serialise } = globalThis.QuickEditEditor;
+const Blocks = globalThis.QuickEditBlocks;
 
 let pass = 0, fail = 0;
 function ok(cond, name, detail) {
@@ -192,6 +193,29 @@ section('write-back — island values become source text');
      'existing newlines keep the file\'s CRLF style');
   eq(serialise('a' + BR + 'b', crlf), 'a<br>b',
      'a <br> is a tag, not a line ending, so CRLF does not apply to it');
+}
+
+section('adding a block — indent, line endings and markup');
+{
+  const src = '<div>\n  <p>one</p>\n  <p>two</p>\n</div>';
+  eq(Blocks.newlineOf(src), '\n', 'an LF file');
+  eq(Blocks.newlineOf('a\r\nb'), '\r\n', 'a CRLF file');
+
+  // Offset 8 is the '<' of the first <p>, which sits after two spaces.
+  eq(Blocks.indentOf(src, src.indexOf('<p>one')), '  ',
+     'the indent of the line the block starts on');
+  eq(Blocks.indentOf('<p>x</p>', 0), '', 'no indent at the very start of a file');
+  eq(Blocks.indentOf('<div><p>x</p>', 5), '',
+     'nothing when the block shares its line with something else');
+  eq(Blocks.indentOf('a\n\t\t<p>x', 4), '\t\t', 'tabs count as indent too');
+
+  eq(Blocks.markup({ tag: 'p', className: '' }, 'hello'), '<p>hello</p>',
+     'a plain block');
+  eq(Blocks.markup({ tag: 'li', className: 'item' }, 'hello'),
+     '<li class="item">hello</li>', 'a block that carries a class');
+  eq(Blocks.markup({ tag: 'p', className: 'a "b"' }, ''),
+     '<p class="a &quot;b&quot;"></p>',
+     'a quote in a class name is encoded, so it cannot break out of the attribute');
 }
 
 section('performance — wall clock, on the ~1MB fixture');

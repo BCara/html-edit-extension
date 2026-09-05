@@ -46,12 +46,30 @@ failing silently.
 4. Press **Save** in the bar at the bottom right. The OS Save dialog opens with
    the original filename.
 
+### Adding a block
+
+You can add another one of something: another paragraph after a paragraph,
+another bullet after a bullet, another heading after a heading. Three ways, all
+equivalent:
+
+- **Enter** with the caret at the very end of a block
+- **`Ctrl`/`Cmd` + `Enter`** from anywhere in it
+- the small **`+`** that appears just below a block when you hover it
+
+The new block copies its neighbour's tag and `class`, so it looks the same, and
+lands with the same indentation. It does *not* copy the `id` — two elements with
+one id would be invalid — or any other attribute.
+
+An added block you never type into is not written to the file at all. The status
+bar counts them so they do not disappear on you silently.
+
 | Key | |
 | --- | --- |
 | `Ctrl`/`Cmd` + `S` | Save |
-| `Ctrl`/`Cmd` + `Z` | Undo |
+| `Ctrl`/`Cmd` + `Z` | Undo (including undoing an added block) |
 | `Ctrl`/`Cmd` + `Shift` + `Z` (or `Ctrl` + `Y`) | Redo |
-| `Enter` | Insert a line break |
+| `Enter` | Line break, or a new block at the end of one |
+| `Ctrl`/`Cmd` + `Enter` | New block |
 
 Chrome cannot write back to a `file://` path, so Save is a download. The dialog
 opens on the original filename, and you can navigate back to the original and
@@ -121,19 +139,29 @@ The popup's details panel says which route was used.
    ending style preserved. No edits means the source is returned unchanged, by
    construction.
 
+Adding a block rides on the same machinery. The tokenizer records where every
+tag sits, and a single recursive walk over the DOM pairs each element with its
+own tags — using the tree the browser already built means nested elements of the
+same name, elements the parser invented (`<tbody>`) and elements that were never
+closed all fall out without any special cases. An insertion is then a
+**zero-length splice** at the offset just past a closing tag: nothing is
+replaced, so every byte that was in the file is still in the file, and because
+nothing is written until you save, an insertion cannot invalidate any other
+offset.
+
 ## Known limitations
 
 **By design**
 
-- **Text only.** You cannot move, add, delete or resize elements, or change CSS,
-  classes, attributes, styles or images. That restraint is the feature.
+- **Text, and adding blocks.** You can change words, and add another block like
+  one that is already there. You cannot move, delete or resize elements, change
+  CSS, classes, attributes or styles, or replace images. That restraint is the
+  feature; adding was added deliberately, after the fact.
 - **No overwrite in place.** Chrome cannot write to a `file://` path. See
   [Using it](#using-it).
 - **Local files only.** `http://` and `https://` pages are not supported.
-- **Enter inserts a `<br>`.** This is the one deliberate exception to "text
-  only": pressing Enter adds a tag your file did not have. It only ever appears
-  inside a region you actively edited, and it is the only markup Quick Edit can
-  ever add.
+- **The only markup Quick Edit writes** is a `<br>` from a line break, and the
+  blocks you explicitly add. Both appear only where you asked for them.
 - **No drag and drop.** Dropping content into a page is a reliable way to get
   markup into it, so drops are refused. Copy and paste instead.
 - **Editing is per run of text.** Each run between tags is its own field, so the
@@ -191,6 +219,8 @@ src/editor.js           edit mode: constraints, history, status bar, saving
 src/lib/tokenizer.js    source text -> character ranges
 src/lib/mapping.js      character ranges <-> DOM text nodes, verified
 src/lib/islands.js      the contenteditable wrappers and their values
+src/lib/blocks.js       where an added block goes, and what it looks like
+src/lib/prompt.js       the in-page card that asks you to choose the file
 src/lib/splice.js       escaping and offset splicing
 src/popup/              toolbar popup and the file-access diagnostic
 test/                   fixtures, suites, and the preservation procedure

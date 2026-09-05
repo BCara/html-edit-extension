@@ -12,17 +12,27 @@
  * forms do not submit. Everything happens inside one island, which is one text
  * node, which is one range of the source file.
  *
- * THE ONE EXCEPTION TO "TEXT ONLY"
- * --------------------------------
- * Enter inserts a <br>, which is a tag the file did not have. It is written out
- * only inside a region the user actively edited, never anywhere else, and it is
- * the only markup Quick Edit can ever add. Documented in the README.
+ * ADDING MARKUP
+ * -------------
+ * Two things here do write markup the file did not have, both only ever where
+ * the user asked for them:
+ *
+ *   - Enter inside a run of text inserts a <br>.
+ *   - Enter at the end of a block, Ctrl/Cmd+Enter, or the "+" that appears on
+ *     hover adds an empty sibling block — another <p> after a <p>, another <li>
+ *     after an <li> — carrying the same tag and class and nothing else.
+ *
+ * An added block is a ZERO-LENGTH splice at a known offset, so it displaces
+ * nothing: every byte that was in the file is still in the file. An added block
+ * left empty is not written at all, on the grounds that it was almost certainly
+ * a mis-click.
  */
 (function (root) {
   'use strict';
 
   var Islands = root.QuickEditIslands;
   var Splice = root.QuickEditSplice;
+  var Blocks = root.QuickEditBlocks;
 
   var UI_ATTR = 'data-quick-edit-ui';
   var MODE_ATTR = 'data-qe-mode';
@@ -76,11 +86,13 @@
     filename: 'page.html',
     regions: [],
     byIsland: null,
+    byElement: null,      // blocks we added -> their region
+    add: null,            // the hover "+" affordance
+    hoverBlock: null,
     history: [],
     historyAt: 0,
     lastTouch: 0,
     pendingBefore: null,
-    savedValues: [],
     ui: null,
     styleEl: null,
     listening: false,
@@ -169,7 +181,8 @@
   function changedCount() {
     var n = 0;
     for (var i = 0; i < state.regions.length; i++) {
-      if (state.regions[i].current !== state.regions[i].original) n++;
+      var r = state.regions[i];
+      if (!r.removed && r.current !== r.original) n++;
     }
     return n;
   }
@@ -177,7 +190,19 @@
   function unsavedCount() {
     var n = 0;
     for (var i = 0; i < state.regions.length; i++) {
-      if (state.regions[i].current !== state.savedValues[i]) n++;
+      var r = state.regions[i];
+      if (!r.removed && r.current !== r.saved) n++;
+    }
+    return n;
+  }
+
+  // Added blocks the user never typed into. They are not written to the file,
+  // so the status bar says so rather than letting them vanish silently.
+  function emptyAddedCount() {
+    var n = 0;
+    for (var i = 0; i < state.regions.length; i++) {
+      var r = state.regions[i];
+      if (r.kind === 'insert' && !r.removed && !r.current) n++;
     }
     return n;
   }
@@ -192,6 +217,7 @@
     var records = state.map.records;
     state.regions = [];
     state.byIsland = new WeakMap();
+    state.byElement = new WeakMap();
 
     for (var i = 0; i < records.length; i++) {
       var record = records[i];
@@ -204,15 +230,16 @@
       island.setAttribute('contenteditable', 'true');
 
       var region = {
+        kind: 'text',
         record: record,
         island: island,
         original: record.node.data,
         current: record.node.data,
+        saved: record.node.data,
       };
       state.regions.push(region);
       state.byIsland.set(island, region);
     }
-    state.savedValues = state.regions.map(function (r) { return r.current; });
   }
 
   /*
@@ -222,14 +249,27 @@
    */
   function teardownRegions() {
     var keep = changedCount() > 0;
-    for (var i = 0; i < state.regions.length; i++) {
-      var island = state.regions[i].island;
-      island.removeAttribute('contenteditable');
-      if (!keep) Islands.unwrap(island);
+
+    // An added block with nothing typed into it was a mis-click. It would not
+    // have been written to the file either way, so take it out of the page too.
+    for (var i = state.regions.length - 1; i >= 0; i--) {
+      var region = state.regions[i];
+      if (region.kind === 'insert' && !region.current && region.element.parentNode) {
+        region.element.parentNode.removeChild(region.element);
+        region.removed = true;
+      }
     }
+
+    for (var j = 0; j < state.regions.length; j++) {
+      var island = state.regions[j].island;
+      island.removeAttribute('contenteditable');
+      if (!keep && state.regions[j].kind === 'text') Islands.unwrap(island);
+    }
+
     if (!keep) {
       state.regions = [];
       state.byIsland = new WeakMap();
+      state.byElement = new WeakMap();
       state.history = [];
       state.historyAt = 0;
     }
@@ -248,7 +288,98 @@
     if (caret != null) Islands.setCaret(island, caret);
   }
 
+  // --- adding blocks ---------------------------------------------------------
+
+  /*
+   * Where a sibling of `block` would go in the file.
+   *
+   * A block we added ourselves is not in the file at all, so a sibling of it
+   * anchors at the same offset. Several insertions can share one offset; save
+   * emits them in document order, and a stable sort keeps them that way.
+   */
+  function anchorForBlock(block) {
+    var owned = state.byElement.get(block);
+    if (owned) return owned.anchor;
+    return Blocks.anchorFor(state.map, state.source, block);
+  }
+
+  function canAddAfter(block) {
+    return !!(block && anchorForBlock(block));
+  }
+
+  function addAfterBlock(block) {
+    if (!block) { flash('There is nothing here to add another of'); return null; }
+
+    var anchor = anchorForBlock(block);
+    if (!anchor) {
+      flash('Quick Edit cannot tell where this block ends in the file');
+      return null;
+    }
+
+    var template = Blocks.templateFor(block);
+    var element = document.createElement(template.tag);
+    if (template.className) element.setAttribute('class', template.className);
+
+    var island = document.createElement('span');
+    island.setAttribute(Islands.ATTR, '');
+    island.setAttribute('contenteditable', 'true');
+    element.appendChild(island);
+    block.parentNode.insertBefore(element, block.nextSibling);
+
+    var region = {
+      kind: 'insert',
+      island: island,
+      element: element,
+      anchor: anchor,
+      template: template,
+      // Only used to carry the file's line-ending style into escaping.
+      span: { raw: Blocks.newlineOf(state.source) },
+      original: '',
+      current: '',
+      saved: '',
+      removed: false,
+    };
+    state.regions.push(region);
+    state.byIsland.set(island, region);
+    state.byElement.set(element, region);
+
+    pushHistory({ kind: 'add', region: region });
+
+    island.focus();
+    Islands.setCaret(island, 0);
+    hideAdd();
+    refresh();
+    return region;
+  }
+
+  function addAfterIsland(island) {
+    return addAfterBlock(Blocks.blockFor(island));
+  }
+
+  // True when the caret sits at the very end of the last run of text in its
+  // block — the point at which Enter should start a new block rather than
+  // break the line.
+  function atEndOfBlock(island) {
+    var value = Islands.readValue(island);
+    if (Islands.caretIndex(island) !== value.length) return false;
+
+    var block = Blocks.blockFor(island);
+    if (!block) return false;
+
+    var inBlock = block.querySelectorAll('[' + Islands.ATTR + ']');
+    return inBlock.length > 0 && inBlock[inBlock.length - 1] === island;
+  }
+
   // --- history ---------------------------------------------------------------
+
+  // Push an entry, dropping any redo branch first.
+  function pushHistory(entry) {
+    if (state.historyAt < state.history.length) state.history.length = state.historyAt;
+    state.history.push(entry);
+    if (state.history.length > HISTORY_LIMIT) state.history.shift();
+    state.historyAt = state.history.length;
+    state.lastTouch = 0;
+  }
 
   function recordChange(island, explicitBefore, explicitCaret) {
     var region = regionOf(island);
@@ -266,12 +397,14 @@
     if (state.historyAt < state.history.length) state.history.length = state.historyAt;
 
     var last = state.history[state.history.length - 1];
-    if (last && last.region === region && (now - state.lastTouch) < COALESCE_MS) {
+    if (last && last.kind === 'text' && last.region === region &&
+        (now - state.lastTouch) < COALESCE_MS) {
       // A run of typing in one region is one undo step, not one per keystroke.
       last.after = after;
       last.caretAfter = Islands.caretIndex(island);
     } else {
       state.history.push({
+        kind: 'text',
         region: region,
         before: before,
         after: after,
@@ -298,16 +431,36 @@
     refresh();
   }
 
+  // Take an added block back out of the page, or put it back.
+  function setAdded(region, present) {
+    if (present === !region.removed) return;
+    if (present) {
+      region.parent.insertBefore(region.element, region.nextSibling);
+      region.removed = false;
+      region.island.focus();
+    } else {
+      // Remember exactly where it sat, so redo can put it back there.
+      region.parent = region.element.parentNode;
+      region.nextSibling = region.element.nextSibling;
+      if (region.parent) region.parent.removeChild(region.element);
+      region.removed = true;
+    }
+    state.lastTouch = 0;
+    refresh();
+  }
+
   function undo() {
     if (state.historyAt === 0) { flash('Nothing to undo'); return; }
     var entry = state.history[--state.historyAt];
-    applyHistory(entry.region, entry.before, entry.caretBefore);
+    if (entry.kind === 'add') setAdded(entry.region, false);
+    else applyHistory(entry.region, entry.before, entry.caretBefore);
   }
 
   function redo() {
     if (state.historyAt >= state.history.length) { flash('Nothing to redo'); return; }
     var entry = state.history[state.historyAt++];
-    applyHistory(entry.region, entry.after, entry.caretAfter);
+    if (entry.kind === 'add') setAdded(entry.region, true);
+    else applyHistory(entry.region, entry.after, entry.caretAfter);
   }
 
   // --- input handling --------------------------------------------------------
@@ -322,7 +475,13 @@
 
     if (type === 'insertParagraph' || type === 'insertLineBreak') {
       e.preventDefault();
-      insertPlain(island, '\n');
+      // Enter at the end of a block starts a new one; anywhere else it breaks
+      // the line. Shift+Enter (insertLineBreak) always breaks the line.
+      if (type === 'insertParagraph' && atEndOfBlock(island) && canAddAfter(Blocks.blockFor(island))) {
+        addAfterIsland(island);
+      } else {
+        insertPlain(island, '\n');
+      }
       return;
     }
 
@@ -423,6 +582,13 @@
     if (key === 's') { e.preventDefault(); save(); return; }
     if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
     if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); redo(); return; }
+
+    // Ctrl/Cmd+Enter adds a block from anywhere in it, not just the end.
+    if (key === 'enter') {
+      var island = islandOf(document.activeElement);
+      if (island) { e.preventDefault(); addAfterIsland(island); }
+      return;
+    }
   }
 
   // Following a link would throw away every unsaved edit, and the page is a
@@ -450,6 +616,78 @@
     return '';
   }
 
+  // --- the "+" that appears on hover -----------------------------------------
+
+  var ADD_CSS = [
+    ':host { all: initial; }',
+    'button {',
+    '  font: 600 13px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
+    '  width: 18px; height: 18px; padding: 0;',
+    '  display: flex; align-items: center; justify-content: center;',
+    '  border: 0; border-radius: 50%; cursor: pointer;',
+    '  background: #5b52f0; color: #fff;',
+    '  box-shadow: 0 1px 5px rgba(0, 0, 0, .3);',
+    '  opacity: .75;',
+    '}',
+    'button:hover { opacity: 1; }',
+  ].join('\n');
+
+  function ensureAddButton() {
+    if (state.add && state.add.host.isConnected) return state.add;
+
+    var host = document.createElement('div');
+    host.setAttribute(UI_ATTR, '');
+    [['position', 'absolute'], ['z-index', '2147483646'], ['margin', '0'],
+     ['padding', '0'], ['width', 'auto'], ['height', 'auto'],
+     ['transform', 'none'], ['pointer-events', 'auto'], ['display', 'none'],
+    ].forEach(function (p) { host.style.setProperty(p[0], p[1], 'important'); });
+
+    var shadow = host.attachShadow({ mode: 'closed' });
+    shadow.innerHTML = '<style>' + ADD_CSS + '</style>' +
+                       '<button title="Add another one of these">+</button>';
+    shadow.querySelector('button').addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.hoverBlock) addAfterBlock(state.hoverBlock);
+    });
+
+    document.documentElement.appendChild(host);
+    state.add = { host: host };
+    return state.add;
+  }
+
+  function hideAdd() {
+    if (state.add) state.add.host.style.setProperty('display', 'none', 'important');
+    state.hoverBlock = null;
+  }
+
+  /*
+   * Park the + in the gap just below the block, at its left edge. Positioned in
+   * document coordinates so it stays put while the page scrolls.
+   */
+  function showAddFor(block) {
+    var ui = ensureAddButton();
+    var rect = block.getBoundingClientRect();
+    if (!rect.width && !rect.height) { hideAdd(); return; }
+
+    state.hoverBlock = block;
+    ui.host.style.setProperty('left', (rect.left + window.scrollX) + 'px', 'important');
+    ui.host.style.setProperty('top', (rect.bottom + window.scrollY - 9) + 'px', 'important');
+    ui.host.style.setProperty('display', 'block', 'important');
+  }
+
+  function onMouseOver(e) {
+    if (!state.active) return;
+    if (state.add && e.target === state.add.host) return;   // over the + itself
+
+    var island = islandOf(e.target);
+    if (!island) { hideAdd(); return; }
+
+    var block = Blocks.blockFor(island);
+    if (!block || !canAddAfter(block)) { hideAdd(); return; }
+    if (block !== state.hoverBlock) showAddFor(block);
+  }
+
   var LISTENERS = [
     ['beforeinput', onBeforeInput, true],
     ['input', onInput, true],
@@ -457,6 +695,7 @@
     ['drop', onDrop, true],
     ['dragover', onDragOver, true],
     ['keydown', onKeyDown, true],
+    ['mouseover', onMouseOver, true],
     ['click', onClick, true],
     ['submit', onSubmit, true],
   ];
@@ -531,15 +770,25 @@
   function removeStatusBar() {
     if (state.ui && state.ui.host.parentNode) state.ui.host.parentNode.removeChild(state.ui.host);
     state.ui = null;
+    if (state.add && state.add.host.parentNode) {
+      state.add.host.parentNode.removeChild(state.add.host);
+    }
+    state.add = null;
+    state.hoverBlock = null;
   }
 
   function refresh() {
     if (!state.ui) return;
     var changed = changedCount();
     var unsaved = unsavedCount();
-    state.ui.count.textContent = changed === 0
+    var empty = emptyAddedCount();
+
+    var text = changed === 0
       ? 'no changes'
       : changed + (changed === 1 ? ' change' : ' changes') + (unsaved ? ' · unsaved' : ' · saved');
+    if (empty) text += ' · ' + empty + ' empty block' + (empty === 1 ? '' : 's');
+
+    state.ui.count.textContent = text;
     state.ui.save.disabled = unsaved === 0;
   }
 
@@ -565,10 +814,34 @@
     }).join('<br>');
   }
 
+  /*
+   * Walked in DOCUMENT order rather than region order, because several added
+   * blocks can share one anchor offset — a block added after a block that was
+   * itself added has nowhere else to go. applyEdits sorts by offset with a
+   * stable sort, so feeding them in document order is what keeps them in the
+   * order they appear on screen.
+   */
   function collectEdits() {
     var edits = [];
-    for (var i = 0; i < state.regions.length; i++) {
-      var region = state.regions[i];
+    var islands = document.querySelectorAll('[' + Islands.ATTR + ']');
+
+    for (var i = 0; i < islands.length; i++) {
+      var region = state.byIsland.get(islands[i]);
+      if (!region || region.removed) continue;
+
+      if (region.kind === 'insert') {
+        // An added block nobody typed into is not written at all.
+        if (!region.current) continue;
+        edits.push({
+          start: region.anchor.offset,
+          end: region.anchor.offset,
+          replacement: region.anchor.before +
+            Blocks.markup(region.template, serialise(region.current, region.span)) +
+            region.anchor.after,
+        });
+        continue;
+      }
+
       if (region.current === region.original) continue;   // untouched: never spliced
       edits.push({
         start: region.record.span.start,
@@ -664,7 +937,10 @@
       return Promise.resolve();
     }
 
-    var snapshot = state.regions.map(function (r) { return r.current; });
+    // Captured now, applied on success: the user can keep typing while the
+    // save dialog is open.
+    var snapshot = state.regions.map(function (r) { return { region: r, value: r.current }; });
+    var skipped = emptyAddedCount();
     flash('Saving…');
 
     return requestDownload(text).then(function (res) {
@@ -672,11 +948,15 @@
         flash('Save failed: ' + ((res && res.message) || 'unknown error'));
         return;
       }
-      state.savedValues = snapshot;
+      for (var i = 0; i < snapshot.length; i++) snapshot[i].region.saved = snapshot[i].value;
       refresh();
-      flash(res.viaAnchor
+
+      var where = res.viaAnchor
         ? 'Saved to your Downloads folder as ' + state.filename
-        : 'Saved ' + state.filename + ' — the original file is unchanged');
+        : 'Saved ' + state.filename + ' — the original file is unchanged';
+      flash(skipped
+        ? where + ' (' + skipped + ' empty block' + (skipped === 1 ? '' : 's') + ' left out)'
+        : where);
     });
   }
 
@@ -720,11 +1000,17 @@
   }
 
   function status() {
+    var added = 0;
+    for (var i = 0; i < state.regions.length; i++) {
+      if (state.regions[i].kind === 'insert' && !state.regions[i].removed) added++;
+    }
     return {
       active: state.active,
       regions: state.regions.length,
       changed: changedCount(),
       unsaved: unsavedCount(),
+      added: added,
+      emptyAdded: emptyAddedCount(),
       canUndo: state.historyAt > 0,
       canRedo: state.historyAt < state.history.length,
     };
@@ -737,6 +1023,8 @@
     // directly rather than through a download.
     preview: preview,
     serialise: serialise,
+    addAfterIsland: addAfterIsland,
+    atEndOfBlock: atEndOfBlock,
     setActive: setActive,
     isActive: function () { return state.active; },
     status: status,

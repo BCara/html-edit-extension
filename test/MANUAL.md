@@ -224,6 +224,35 @@ On any fixture, in edit mode:
 
 ---
 
+## 8b. Adding blocks
+
+In edit mode, on `simple.html`:
+
+| Try this | Expected |
+| --- | --- |
+| Put the caret at the very end of a paragraph, press **Enter** | A new empty paragraph appears below it, caret in it. A dashed placeholder box marks it while it is empty |
+| Press **Enter** in the *middle* of a paragraph | A line break, as before. Same key, two behaviours, by design |
+| **Ctrl/Cmd + Enter** from anywhere in a paragraph | New paragraph below |
+| Hover a paragraph | A small **+** appears just below its left edge. Click it | 
+| Do the same on a **list item** | You get another `<li>`, not a `<p>`, and it lands inside the list |
+| Add a block, type nothing, look at the status bar | It says `1 empty block` |
+| Add a block, type nothing, **Save** | The saved file does **not** contain it. The status bar says `1 empty block left out` |
+| Add a block, type in it, **Ctrl/Cmd + Z** twice | First undo removes the text, second removes the block itself. Redo brings both back |
+
+Then save and diff:
+
+```
+git diff --no-index test/fixtures/simple.html ~/Downloads/simple.html
+```
+
+✅ **Expect:** the diff shows *added* lines only — no line is removed or altered
+except ones you edited. An added paragraph should be indented to match its
+neighbour and carry the same `class`, with no `id`.
+
+❌ Failure: any existing line changing to make room for the new one.
+
+---
+
 ## 9. The unsaved-changes warning
 
 1. Make an edit. Do **not** save.
