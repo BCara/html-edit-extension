@@ -33,6 +33,7 @@
   var Islands = root.QuickEditIslands;
   var Splice = root.QuickEditSplice;
   var Blocks = root.QuickEditBlocks;
+  var Comments = root.QuickEditComments;
 
   var UI_ATTR = 'data-quick-edit-ui';
   var MODE_ATTR = 'data-qe-mode';
@@ -87,8 +88,13 @@
     regions: [],
     byIsland: null,
     byElement: null,      // blocks we added -> their region
-    add: null,            // the hover "+" affordance
+    add: null,            // the hover controls
     hoverBlock: null,
+    comments: [],         // comment regions, existing and new
+    rail: null,           // the margin the cards live in
+    railRendering: false, // guards the blur fired by rebuilding the cards
+    editingComment: null, // the region whose card has focus
+    railStyle: null,      // the page's own inline <html> style, to put back
     history: [],
     historyAt: 0,
     lastTouch: 0,
@@ -126,6 +132,16 @@
     '}',
     ':root[data-qe-mode] [data-qe-island][data-qe-changed] {',
     '  background: rgba(217, 160, 30, .16) !important;',
+    '}',
+    // A commented section is shaded and barred, the way a word processor marks
+    // one, so it is obvious which note belongs to which passage.
+    ':root[data-qe-mode] [data-qe-commented] {',
+    '  background: rgba(217, 160, 30, .10) !important;',
+    '  box-shadow: -4px 0 0 rgba(217, 160, 30, .65) !important;',
+    '}',
+    ':root[data-qe-mode] [data-qe-commented][data-qe-comment-active] {',
+    '  background: rgba(217, 160, 30, .2) !important;',
+    '  box-shadow: -4px 0 0 rgba(217, 160, 30, 1) !important;',
     '}',
     // An island emptied of all its text would otherwise be impossible to click
     // back into.
@@ -184,7 +200,7 @@
       var r = state.regions[i];
       if (!r.removed && r.current !== r.original) n++;
     }
-    return n;
+    return n + commentChangedCount();
   }
 
   function unsavedCount() {
@@ -193,7 +209,7 @@
       var r = state.regions[i];
       if (!r.removed && r.current !== r.saved) n++;
     }
-    return n;
+    return n + commentUnsavedCount();
   }
 
   // Added blocks the user never typed into. They are not written to the file,
@@ -266,10 +282,11 @@
       if (!keep && state.regions[j].kind === 'text') Islands.unwrap(island);
     }
 
-    if (!keep) {
+    if (!keep && commentChangedCount() === 0) {
       state.regions = [];
       state.byIsland = new WeakMap();
       state.byElement = new WeakMap();
+      state.comments = [];
       state.history = [];
       state.historyAt = 0;
     }
@@ -449,17 +466,32 @@
     refresh();
   }
 
+  function setCommentText(region, text) {
+    region.text = text;
+    region.editingFrom = undefined;
+    renderRail();
+    refresh();
+  }
+
   function undo() {
+    flushCommentEdit();
     if (state.historyAt === 0) { flash('Nothing to undo'); return; }
     var entry = state.history[--state.historyAt];
     if (entry.kind === 'add') setAdded(entry.region, false);
+    else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, true);
+    else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, false);
+    else if (entry.kind === 'comment-text') setCommentText(entry.region, entry.before);
     else applyHistory(entry.region, entry.before, entry.caretBefore);
   }
 
   function redo() {
+    flushCommentEdit();
     if (state.historyAt >= state.history.length) { flash('Nothing to redo'); return; }
     var entry = state.history[state.historyAt++];
     if (entry.kind === 'add') setAdded(entry.region, true);
+    else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, false);
+    else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, true);
+    else if (entry.kind === 'comment-text') setCommentText(entry.region, entry.after);
     else applyHistory(entry.region, entry.after, entry.caretAfter);
   }
 
@@ -520,6 +552,7 @@
     recordChange(island,
                  matches ? pending.value : undefined,
                  matches ? pending.caret : undefined);
+    positionCards();     // the text just reflowed; the cards follow it
   }
 
   function insertPlain(island, text) {
@@ -620,16 +653,19 @@
 
   var ADD_CSS = [
     ':host { all: initial; }',
+    '.row { display: flex; gap: 4px; }',
     'button {',
     '  font: 600 13px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
     '  width: 18px; height: 18px; padding: 0;',
     '  display: flex; align-items: center; justify-content: center;',
     '  border: 0; border-radius: 50%; cursor: pointer;',
-    '  background: #5b52f0; color: #fff;',
-    '  box-shadow: 0 1px 5px rgba(0, 0, 0, .3);',
+    '  color: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, .3);',
     '  opacity: .75;',
     '}',
     'button:hover { opacity: 1; }',
+    'button.block { background: #5b52f0; }',
+    'button.note { background: #d9a01e; }',
+    'svg { width: 10px; height: 10px; fill: currentColor; display: block; }',
   ].join('\n');
 
   function ensureAddButton() {
@@ -644,11 +680,24 @@
 
     var shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = '<style>' + ADD_CSS + '</style>' +
-                       '<button title="Add another one of these">+</button>';
-    shadow.querySelector('button').addEventListener('click', function (e) {
+      '<div class="row">' +
+        '<button class="block" title="Add another one of these">+</button>' +
+        '<button class="note" title="Comment on this section">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+          '<path d="M3 2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7l-3.6 2.8V12H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>' +
+          '</svg>' +
+        '</button>' +
+      '</div>';
+
+    shadow.querySelector('.block').addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
       if (state.hoverBlock) addAfterBlock(state.hoverBlock);
+    });
+    shadow.querySelector('.note').addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.hoverBlock) addCommentTo(state.hoverBlock);
     });
 
     document.documentElement.appendChild(host);
@@ -703,13 +752,347 @@
   function addListeners() {
     if (state.listening) return;
     LISTENERS.forEach(function (l) { document.addEventListener(l[0], l[1], l[2]); });
+    window.addEventListener('resize', onResize);
     state.listening = true;
   }
 
   function removeListeners() {
     if (!state.listening) return;
     LISTENERS.forEach(function (l) { document.removeEventListener(l[0], l[1], l[2]); });
+    window.removeEventListener('resize', onResize);
     state.listening = false;
+  }
+
+  // --- comments --------------------------------------------------------------
+
+  var COMMENTED_ATTR = 'data-qe-commented';
+  var ACTIVE_ATTR = 'data-qe-comment-active';
+  var RAIL_WIDTH = 296;
+
+  var RAIL_CSS = [
+    ':host { all: initial; }',
+    '.card {',
+    '  position: absolute; right: 0; width: 260px;',
+    '  font: 12px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
+    '  background: #fffdf7; color: #22242a;',
+    '  border: 1px solid #e6ddc4; border-left: 3px solid #d9a01e;',
+    '  border-radius: 6px; padding: 8px 9px 7px;',
+    '  box-shadow: 0 1px 6px rgba(0, 0, 0, .12);',
+    '  transition: top .12s ease;',
+    '  box-sizing: border-box;',
+    '}',
+    '.card.unsaved { border-left-color: #5b52f0; }',
+    '.head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }',
+    '.who { font-weight: 600; color: #6b6250; flex: 1; }',
+    '.del {',
+    '  font: 14px/1 system-ui, sans-serif; border: 0; background: transparent;',
+    '  color: #9a917d; cursor: pointer; padding: 0 2px; border-radius: 3px;',
+    '}',
+    '.del:hover { background: rgba(0, 0, 0, .07); color: #b91c1c; }',
+    'textarea {',
+    '  font: inherit; width: 100%; border: 0; padding: 0; margin: 0;',
+    '  background: transparent; color: inherit; resize: none; overflow: hidden;',
+    '  outline: none; display: block;',
+    '}',
+    'textarea::placeholder { color: #a9a08c; }',
+    '@media (prefers-color-scheme: dark) {',
+    '  .card { background: #2a2620; color: #ece9e2; border-color: #4a4133; }',
+    '  .who { color: #b8ad93; }',
+    '  textarea::placeholder { color: #7d7462; }',
+    '}',
+  ].join('\n');
+
+  function liveComments() {
+    return state.comments.filter(function (r) { return !r.removed; });
+  }
+
+  function commentChangedCount() {
+    var n = 0;
+    for (var i = 0; i < state.comments.length; i++) {
+      var r = state.comments[i];
+      if (r.removed) { if (r.token) n++; continue; }   // a deleted existing comment is a change
+      if (r.text.trim() !== r.original) n++;
+    }
+    return n;
+  }
+
+  function commentUnsavedCount() {
+    var n = 0;
+    for (var i = 0; i < state.comments.length; i++) {
+      var r = state.comments[i];
+      if (r.removed) { if (r.token || r.saved) n++; continue; }
+      if (r.text.trim() !== r.saved) n++;
+    }
+    return n;
+  }
+
+  function emptyCommentCount() {
+    var n = 0;
+    var live = liveComments();
+    for (var i = 0; i < live.length; i++) if (!live[i].text.trim()) n++;
+    return n;
+  }
+
+  /*
+   * Comments already in the file. Anything that is not one of ours — the
+   * boilerplate a generator left behind, a conditional comment — is left
+   * exactly where it is and never shown.
+   */
+  function buildComments() {
+    state.comments = [];
+    var paired = state.map.comments.paired;
+
+    for (var i = 0; i < paired.length; i++) {
+      var text = Comments.textOf(paired[i].node.data);
+      if (text === null) continue;
+      var node = paired[i].node;
+      state.comments.push({
+        kind: 'comment',
+        token: paired[i].token,
+        node: node,
+        block: node.nextElementSibling || node.parentElement,
+        text: text,
+        original: text,
+        saved: text,
+        removed: false,
+        anchor: null,
+        card: null,
+      });
+    }
+  }
+
+  function addCommentTo(block) {
+    if (!block) return null;
+    flushCommentEdit();
+    var anchor = Comments.anchorFor(state.map, state.source, block);
+    if (!anchor) {
+      flash('Quick Edit cannot tell where this section starts in the file');
+      return null;
+    }
+    var region = {
+      kind: 'comment',
+      token: null,
+      node: null,
+      block: block,
+      text: '',
+      original: '',
+      saved: '',
+      removed: false,
+      anchor: anchor,
+      card: null,
+    };
+    state.comments.push(region);
+    pushHistory({ kind: 'comment-add', region: region });
+    hideAdd();
+    renderRail(region);
+    refresh();
+    return region;
+  }
+
+  function setCommentRemoved(region, removed) {
+    region.removed = removed;
+    renderRail();
+    refresh();
+  }
+
+  function removeComment(region) {
+    flushCommentEdit();
+    pushHistory({ kind: 'comment-remove', region: region });
+    setCommentRemoved(region, true);
+  }
+
+  // Text changes are one history step per visit to a card, not per keystroke.
+  function commitCommentText(region) {
+    if (region.editingFrom === undefined || region.editingFrom === region.text) {
+      region.editingFrom = undefined;
+      return;
+    }
+    pushHistory({
+      kind: 'comment-text',
+      region: region,
+      before: region.editingFrom,
+      after: region.text,
+    });
+    region.editingFrom = undefined;
+  }
+
+  /*
+   * Settle any half-finished typing in a card before something structural
+   * happens.
+   *
+   * Without this, adding or deleting a comment rebuilds the margin, which
+   * destroys the focused textarea, which fires blur, which files the typing as
+   * a history step AFTER the structural one. Undo would then take back the
+   * typing instead of the deletion — the wrong thing, and confusingly so.
+   */
+  function flushCommentEdit() {
+    if (!state.editingComment) return;
+    commitCommentText(state.editingComment);
+    state.editingComment = null;
+  }
+
+  // --- the comment margin ----------------------------------------------------
+
+  /*
+   * The cards live in a margin down the right-hand side, like a word processor.
+   * Making room for it means widening the page's right padding while edit mode
+   * is on — a visible change to the layout, but a temporary one, and the file
+   * never hears about it. The page's own inline style is put back on the way
+   * out.
+   */
+  function ensureRail() {
+    if (state.rail && state.rail.host.isConnected) return state.rail;
+
+    var html = document.documentElement;
+    state.railStyle = {
+      paddingRight: html.style.getPropertyValue('padding-right'),
+      paddingPriority: html.style.getPropertyPriority('padding-right'),
+      position: html.style.getPropertyValue('position'),
+      positionPriority: html.style.getPropertyPriority('position'),
+    };
+    html.style.setProperty('padding-right', RAIL_WIDTH + 'px', 'important');
+    // So the rail positions against the padding box rather than the viewport.
+    html.style.setProperty('position', 'relative', 'important');
+
+    var host = document.createElement('div');
+    host.setAttribute(UI_ATTR, '');
+    [['position', 'absolute'], ['top', '0'], ['right', '10px'],
+     ['width', '260px'], ['height', '0'], ['margin', '0'], ['padding', '0'],
+     ['z-index', '2147483645'], ['pointer-events', 'auto'],
+    ].forEach(function (p) { host.style.setProperty(p[0], p[1], 'important'); });
+
+    var shadow = host.attachShadow({ mode: 'closed' });
+    shadow.innerHTML = '<style>' + RAIL_CSS + '</style><div class="list"></div>';
+    html.appendChild(host);
+
+    state.rail = { host: host, shadow: shadow, list: shadow.querySelector('.list') };
+    return state.rail;
+  }
+
+  function closeRail() {
+    if (state.rail && state.rail.host.parentNode) {
+      state.rail.host.parentNode.removeChild(state.rail.host);
+    }
+    state.rail = null;
+
+    if (state.railStyle) {
+      var html = document.documentElement;
+      var saved = state.railStyle;
+      html.style.removeProperty('padding-right');
+      html.style.removeProperty('position');
+      if (saved.paddingRight) {
+        html.style.setProperty('padding-right', saved.paddingRight, saved.paddingPriority);
+      }
+      if (saved.position) {
+        html.style.setProperty('position', saved.position, saved.positionPriority);
+      }
+      state.railStyle = null;
+    }
+  }
+
+  function clearHighlights() {
+    var marked = document.querySelectorAll('[' + COMMENTED_ATTR + ']');
+    for (var i = 0; i < marked.length; i++) {
+      marked[i].removeAttribute(COMMENTED_ATTR);
+      marked[i].removeAttribute(ACTIVE_ATTR);
+    }
+  }
+
+  function autoGrow(textarea) {
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+  }
+
+  function renderRail(focusRegion) {
+    var regions = liveComments();
+
+    if (!regions.length) {
+      state.railRendering = true;
+      clearHighlights();
+      closeRail();
+      state.railRendering = false;
+      return;
+    }
+
+    var rail = ensureRail();
+    state.railRendering = true;
+    rail.list.textContent = '';
+    clearHighlights();
+
+    regions.forEach(function (region) {
+      var card = document.createElement('div');
+      card.className = 'card' + (region.text.trim() === region.saved ? '' : ' unsaved');
+      card.innerHTML =
+        '<div class="head"><span class="who">Comment</span>' +
+        '<button class="del" title="Delete this comment">&times;</button></div>' +
+        '<textarea rows="1" placeholder="Write a comment…"></textarea>';
+
+      var textarea = card.querySelector('textarea');
+      textarea.value = region.text;
+
+      textarea.addEventListener('input', function () {
+        region.text = textarea.value;
+        autoGrow(textarea);
+        card.className = 'card' + (region.text.trim() === region.saved ? '' : ' unsaved');
+        positionCards();
+        refresh();
+      });
+      textarea.addEventListener('focus', function () {
+        region.editingFrom = region.text;
+        state.editingComment = region;
+        if (region.block && region.block.setAttribute) region.block.setAttribute(ACTIVE_ATTR, '');
+      });
+      textarea.addEventListener('blur', function () {
+        // A blur caused by rebuilding the margin is not the user finishing an
+        // edit; flushCommentEdit has already dealt with any real one.
+        if (state.railRendering) return;
+        if (state.editingComment === region) state.editingComment = null;
+        commitCommentText(region);
+        if (region.block && region.block.removeAttribute) region.block.removeAttribute(ACTIVE_ATTR);
+      });
+      card.querySelector('.del').addEventListener('click', function () { removeComment(region); });
+
+      rail.list.appendChild(card);
+      region.card = card;
+      autoGrow(textarea);
+
+      if (region.block && region.block.setAttribute) {
+        region.block.setAttribute(COMMENTED_ATTR, '');
+      }
+    });
+
+    state.railRendering = false;
+    positionCards();
+    if (focusRegion && focusRegion.card) focusRegion.card.querySelector('textarea').focus();
+  }
+
+  /*
+   * Line each card up with the section it belongs to, and push it down if the
+   * one above would overlap it. Same idea as a word processor's margin: the
+   * cards want to sit beside their text and settle for as close as they can get.
+   */
+  function positionCards() {
+    if (!state.rail) return;
+    var regions = liveComments();
+    var bottom = 0;
+
+    for (var i = 0; i < regions.length; i++) {
+      var region = regions[i];
+      if (!region.card) continue;
+
+      var wanted = bottom;
+      if (region.block && region.block.getBoundingClientRect) {
+        var rect = region.block.getBoundingClientRect();
+        wanted = rect.top + window.scrollY;
+      }
+      var top = Math.max(wanted, bottom);
+      region.card.style.top = top + 'px';
+      bottom = top + region.card.offsetHeight + 8;
+    }
+  }
+
+  function onResize() {
+    positionCards();
   }
 
   // --- status bar ------------------------------------------------------------
@@ -781,12 +1164,12 @@
     if (!state.ui) return;
     var changed = changedCount();
     var unsaved = unsavedCount();
-    var empty = emptyAddedCount();
+    var empty = emptyAddedCount() + emptyCommentCount();
 
     var text = changed === 0
       ? 'no changes'
       : changed + (changed === 1 ? ' change' : ' changes') + (unsaved ? ' · unsaved' : ' · saved');
-    if (empty) text += ' · ' + empty + ' empty block' + (empty === 1 ? '' : 's');
+    if (empty) text += ' · ' + empty + ' empty' + (empty === 1 ? '' : 's') + ' not saved';
 
     state.ui.count.textContent = text;
     state.ui.save.disabled = unsaved === 0;
@@ -849,7 +1232,52 @@
         replacement: serialise(region.current, region.record.span),
       });
     }
+
+    collectCommentEdits(edits);
     return edits;
+  }
+
+  /*
+   * Comments are ranges too: a new one is a zero-length splice before its
+   * section, an edited one replaces the comment that is already there, and a
+   * deleted one cuts it — taking the whole line with it if the comment had the
+   * line to itself.
+   *
+   * A comment left empty is treated as no comment: a new one is never written,
+   * and an existing one emptied out is removed.
+   */
+  function collectCommentEdits(edits) {
+    var newline = Blocks.newlineOf(state.source);
+
+    for (var i = 0; i < state.comments.length; i++) {
+      var region = state.comments[i];
+      var text = region.text.trim();
+
+      if (region.removed || (!text && region.token)) {
+        if (!region.token) continue;                 // a new one, discarded
+        var cut = Comments.deleteRange(state.source, region.token);
+        edits.push({ start: cut.start, end: cut.end, replacement: '' });
+        continue;
+      }
+      if (!text) continue;                           // a new one, never written in
+
+      if (region.token) {
+        if (text === region.original) continue;      // untouched
+        edits.push({
+          start: region.token.start,
+          end: region.token.end,
+          replacement: Comments.markup(
+            text, Blocks.indentOf(state.source, region.token.start), newline),
+        });
+        continue;
+      }
+
+      edits.push({
+        start: region.anchor.offset,
+        end: region.anchor.offset,
+        replacement: Comments.markup(text, region.anchor.indent, newline) + region.anchor.after,
+      });
+    }
   }
 
   function send(message) {
@@ -929,6 +1357,8 @@
   function save() {
     if (!state.regions.length) { flash('Nothing to save'); return Promise.resolve(); }
 
+    flushCommentEdit();
+
     var text;
     try {
       text = preview();
@@ -939,8 +1369,9 @@
 
     // Captured now, applied on success: the user can keep typing while the
     // save dialog is open.
-    var snapshot = state.regions.map(function (r) { return { region: r, value: r.current }; });
-    var skipped = emptyAddedCount();
+    var snapshot = state.regions.map(function (r) { return { region: r, value: r.current }; })
+      .concat(state.comments.map(function (r) { return { region: r, value: r.text.trim() }; }));
+    var skipped = emptyAddedCount() + emptyCommentCount();
     flash('Saving…');
 
     return requestDownload(text).then(function (res) {
@@ -949,13 +1380,14 @@
         return;
       }
       for (var i = 0; i < snapshot.length; i++) snapshot[i].region.saved = snapshot[i].value;
+      renderRail();
       refresh();
 
       var where = res.viaAnchor
         ? 'Saved to your Downloads folder as ' + state.filename
         : 'Saved ' + state.filename + ' — the original file is unchanged';
       flash(skipped
-        ? where + ' (' + skipped + ' empty block' + (skipped === 1 ? '' : 's') + ' left out)'
+        ? where + ' (' + skipped + ' empty left out)'
         : where);
     });
   }
@@ -968,11 +1400,16 @@
     if (next) {
       state.active = true;
       ensureStyles();
-      if (!state.regions.length) buildRegions();
-      else state.regions.forEach(function (r) { r.island.setAttribute('contenteditable', 'true'); });
+      if (!state.regions.length) {
+        buildRegions();
+        buildComments();
+      } else {
+        state.regions.forEach(function (r) { r.island.setAttribute('contenteditable', 'true'); });
+      }
       document.documentElement.setAttribute(MODE_ATTR, 'on');
       addListeners();
       ensureStatusBar();
+      renderRail();
       refresh();
       if (!state.regions.length) flash('No editable text found in this file');
     } else {
@@ -980,6 +1417,8 @@
       document.documentElement.removeAttribute(MODE_ATTR);
       removeListeners();
       teardownRegions();
+      clearHighlights();
+      closeRail();
       removeStatusBar();
       // The stylesheet stays: any wrappers left holding unsaved edits still need
       // `all: unset` to remain invisible.
@@ -1011,6 +1450,8 @@
       unsaved: unsavedCount(),
       added: added,
       emptyAdded: emptyAddedCount(),
+      comments: liveComments().length,
+      emptyComments: emptyCommentCount(),
       canUndo: state.historyAt > 0,
       canRedo: state.historyAt < state.history.length,
     };
@@ -1025,6 +1466,9 @@
     serialise: serialise,
     addAfterIsland: addAfterIsland,
     atEndOfBlock: atEndOfBlock,
+    addCommentTo: addCommentTo,
+    removeComment: removeComment,
+    commentRegions: liveComments,
     setActive: setActive,
     isActive: function () { return state.active; },
     status: status,

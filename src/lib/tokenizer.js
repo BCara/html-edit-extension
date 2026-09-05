@@ -14,6 +14,20 @@
  * "where does the text live", and all we need from the DOM is "which text node
  * is which". mapping.js then pairs them up and *verifies* every pair.
  *
+ * COMMENTS
+ * --------
+ * scan() records comments too, as {start, end, data, bogus}. Quick Edit stores
+ * a user's notes as ordinary HTML comments — invisible in a browser, plainly
+ * readable in a text editor, and carried along whenever the file is sent
+ * anywhere — so it needs to find the ones already in a file as well as write
+ * new ones.
+ *
+ * `bogus` marks the constructs that are not written as comments but which the
+ * parser turns into comment nodes anyway: <![if !IE]>, <?php ... ?>, </3>. They
+ * are recorded so the sequence still lines up with the DOM, and skipped for
+ * every other purpose. The doctype is NOT one of these — it becomes a
+ * DocumentType node, not a comment — so it is not recorded at all.
+ *
  * TAGS
  * ----
  * scan() also records every start and end tag it walks past, as {start, end,
@@ -169,6 +183,7 @@
   function scan(source) {
     var spans = [];
     var tags = [];
+    var comments = [];
     var len = source.length;
     var i = 0;
     var textStart = 0;
@@ -201,10 +216,22 @@
       push(textStart, end, 'text');
     }
 
-    // Skip a construct that yields no text node, from '<' at i to just past '>'.
-    function skipTo(closeFrom) {
+    /*
+     * Skip a construct that yields no text node, from '<' at i to just past '>'.
+     * `asComment` says whether the parser will nonetheless produce a comment
+     * node for it, which is true of everything here except the doctype.
+     */
+    function skipTo(closeFrom, asComment) {
+      var from = i;
       var close = source.indexOf('>', closeFrom);
       i = close === -1 ? len : close + 1;
+      if (asComment) {
+        comments.push({
+          start: from, end: i,
+          data: source.slice(from + 1, close === -1 ? len : close),
+          bogus: true,
+        });
+      }
       textStart = i;
     }
 
@@ -217,21 +244,28 @@
       if (next === '!' && source[i + 2] === '-' && source[i + 3] === '-') {
         flushText(i);
         var close = source.indexOf('-->', i + 4);
-        i = close === -1 ? len : close + 3;
+        var stop = close === -1 ? len : close + 3;
+        comments.push({
+          start: i, end: stop,
+          data: source.slice(i + 4, close === -1 ? len : close),
+          bogus: false,
+        });
+        i = stop;
         textStart = i;
         continue;
       }
 
-      // Doctype, CDATA-ish, processing instruction, bogus comment.
+      // Doctype (a DocumentType node), or CDATA-ish / processing instruction /
+      // bogus comment (all of which become comment nodes).
       if (next === '!' || next === '?') {
         flushText(i);
-        skipTo(i + 2);
+        skipTo(i + 2, !/^<!doctype/i.test(source.substr(i, 9)));
         continue;
       }
 
       if (next === '/') {
         flushText(i);
-        if (!isAlpha(source[i + 2])) { skipTo(i + 2); continue; } // bogus comment
+        if (!isAlpha(source[i + 2])) { skipTo(i + 2, true); continue; } // bogus comment
         var endTag = readTag(source, i);
         tags.push(endTag);
         i = endTag.end;
@@ -272,7 +306,7 @@
       i++;
     }
     flushText(len);
-    return { spans: spans, tags: tags };
+    return { spans: spans, tags: tags, comments: comments };
   }
 
   // The text spans on their own — by far the most common thing to want.

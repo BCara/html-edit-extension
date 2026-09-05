@@ -63,6 +63,31 @@ one id would be invalid — or any other attribute.
 An added block you never type into is not written to the file at all. The status
 bar counts them so they do not disappear on you silently.
 
+### Comments
+
+Hover a section and click the **speech bubble** next to the `+`. A card opens in
+a margin down the right-hand side, the way a word processor does it: the section
+you commented on is shaded and barred so it is obvious which note belongs to
+what, and cards line up beside their section, sliding down when they would
+overlap.
+
+A comment is stored as an ordinary HTML comment just before its section:
+
+```html
+<!-- comment: needs a figure for Q3 -->
+<p>Revenue grew by 12% over the quarter.</p>
+```
+
+That choice is the whole point. Notes kept inside the browser could not travel;
+these live *in* the document, so emailing the file carries them, a text editor
+shows them plainly, and an AI you hand the file back to reads them. Anyone just
+viewing the page in a browser sees none of it.
+
+Comments already in a file show up when you open it, so a note someone left you
+comes through. Comments that are *not* Quick Edit's — a build tool's boilerplate,
+a conditional comment — are never shown and never touched. Delete a comment with
+the `×` on its card; a comment left empty is not written at all.
+
 | Key | |
 | --- | --- |
 | `Ctrl`/`Cmd` + `S` | Save |
@@ -139,7 +164,7 @@ The popup's details panel says which route was used.
    ending style preserved. No edits means the source is returned unchanged, by
    construction.
 
-Adding a block rides on the same machinery. The tokenizer records where every
+Adding a block, and adding a comment, ride on the same machinery. The tokenizer records where every
 tag sits, and a single recursive walk over the DOM pairs each element with its
 own tags — using the tree the browser already built means nested elements of the
 same name, elements the parser invented (`<tbody>`) and elements that were never
@@ -153,15 +178,19 @@ offset.
 
 **By design**
 
-- **Text, and adding blocks.** You can change words, and add another block like
-  one that is already there. You cannot move, delete or resize elements, change
-  CSS, classes, attributes or styles, or replace images. That restraint is the
-  feature; adding was added deliberately, after the fact.
+- **Text, blocks and comments.** You can change words, add another block like one
+  that is already there, and attach comments. You cannot move, delete or resize
+  elements, change CSS, classes, attributes or styles, or replace images. That
+  restraint is the feature; the additions were made deliberately, after the fact.
 - **No overwrite in place.** Chrome cannot write to a `file://` path. See
   [Using it](#using-it).
 - **Local files only.** `http://` and `https://` pages are not supported.
-- **The only markup Quick Edit writes** is a `<br>` from a line break, and the
-  blocks you explicitly add. Both appear only where you asked for them.
+- **The only markup Quick Edit writes** is a `<br>` from a line break, the blocks
+  you explicitly add, and the `<!-- comment: -->` notes you write. All of it
+  appears only where you asked for it.
+- **The comment margin moves the page over** while it is open, by widening the
+  page's right padding. It is put back when you leave edit mode, and the file
+  never hears about it — but on an unusual layout it may look odd while open.
 - **No drag and drop.** Dropping content into a page is a reliable way to get
   markup into it, so drops are refused. Copy and paste instead.
 - **Editing is per run of text.** Each run between tags is its own field, so the
@@ -220,6 +249,7 @@ src/lib/tokenizer.js    source text -> character ranges
 src/lib/mapping.js      character ranges <-> DOM text nodes, verified
 src/lib/islands.js      the contenteditable wrappers and their values
 src/lib/blocks.js       where an added block goes, and what it looks like
+src/lib/comments.js     reading and writing notes as HTML comments
 src/lib/prompt.js       the in-page card that asks you to choose the file
 src/lib/splice.js       escaping and offset splicing
 src/popup/              toolbar popup and the file-access diagnostic

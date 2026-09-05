@@ -109,6 +109,57 @@
     return out;
   }
 
+  /*
+   * Comment nodes, in document order, mirroring collectTextNodes.
+   */
+  function collectComments(root, out) {
+    out = out || [];
+    for (var n = root.firstChild; n; n = n.nextSibling) {
+      if (n.nodeType === 8) {
+        out.push(n);
+      } else if (n.nodeType === 1) {
+        if (n.tagName === 'TEMPLATE' && n.content) collectComments(n.content, out);
+        else if (n.firstChild) collectComments(n, out);
+      }
+    }
+    return out;
+  }
+
+  var COMMENT_LOOKAHEAD = 8;
+
+  /*
+   * Pair DOM comment nodes with the comments in the source.
+   *
+   * Only real <!-- --> comments are paired. The constructs the parser turns
+   * into comment nodes without their being written as comments — <![if !IE]>,
+   * <?php ?>, </3> — are recorded by the tokenizer purely so the sequence lines
+   * up, and are deliberately left unpaired: rewriting one would be rewriting
+   * something whose meaning we do not understand.
+   *
+   * Matching is in document order and requires the text to be identical, with a
+   * short lookahead to step over the unpaired ones. A comment that cannot be
+   * matched exactly is simply not editable.
+   */
+  function mapComments(doc, tokens) {
+    var nodes = collectComments(doc);
+    var byNode = new WeakMap();
+    var paired = [];
+    var ti = 0;
+
+    for (var ni = 0; ni < nodes.length; ni++) {
+      var data = nodes[ni].data;
+      for (var k = ti; k < tokens.length && k < ti + COMMENT_LOOKAHEAD; k++) {
+        if (tokens[k].bogus) continue;
+        if (normalizeNewlines(tokens[k].data) !== data) continue;
+        byNode.set(nodes[ni], tokens[k]);
+        paired.push({ node: nodes[ni], token: tokens[k] });
+        ti = k + 1;
+        break;
+      }
+    }
+    return { byNode: byNode, paired: paired, nodes: nodes };
+  }
+
   // ---------------------------------------------------------------------------
   // Sequence alignment
   // ---------------------------------------------------------------------------
@@ -418,10 +469,12 @@
       if (records[j].editable) spanOf.set(records[j].node, records[j].span);
     }
     var elements = mapElements(doc, scanned.tags, spanOf);
+    var comments = mapComments(doc, scanned.comments);
 
     return {
       records: records,
       elements: elements,
+      comments: comments,
       tags: scanned.tags,
       stats: {
         spans: spans.length, nodes: nodes.length,
@@ -433,6 +486,8 @@
   root.QuickEditMap = {
     build: build,
     mapElements: mapElements,
+    mapComments: mapComments,
+    collectComments: collectComments,
     collectTextNodes: collectTextNodes,
     expectedText: expectedText,
     normalizeNewlines: normalizeNewlines,

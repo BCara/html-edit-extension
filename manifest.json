@@ -7,7 +7,7 @@
   // cannot work without it — see the justification on each one.
   "manifest_version": 3,
   "name": "Quick Edit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Edit the visible text of a local HTML file in place and save it without disturbing the markup.",
 
   "permissions": [

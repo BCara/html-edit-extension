@@ -95,6 +95,20 @@ function dispatchBeforeInput(island, inputType, index) {
   return ev;
 }
 
+/*
+ * Write into a comment card the way a person does — through its textarea, then
+ * away from it — so the input and blur handlers both run and the edit is filed
+ * in history properly. Setting region.text directly would leave a card focused
+ * with an uncommitted edit hanging off it.
+ */
+function writeComment(region, text) {
+  const textarea = region.card.querySelector('textarea');
+  textarea.focus();
+  textarea.value = text;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  textarea.blur();
+}
+
 function pasteInto(island, plain, html, index) {
   caretTo(island, index);
   const dt = new DataTransfer();
@@ -349,6 +363,84 @@ async function run() {
                                  (el) => el.getAttribute('contenteditable') === 'true'),
        'turning edit mode back on re-arms them');
     QuickEditEditor.setActive(false);
+  }
+
+  heading('comments — one that was already in the file');
+  {
+    const regions = QuickEditEditor.commentRegions();
+    const existing = regions.find((r) => r.text === 'this note was already in the file');
+    ok(!!existing, 'a comment already in the file is picked up');
+    ok(existing && existing.block === document.getElementById('p6'),
+       'and is attached to the section that follows it');
+    eq(QuickEditEditor.preview(), QuickEditEditor.preview(),
+       'reading it changes nothing');
+    ok(QuickEditEditor.preview().indexOf('<!-- comment: this note was already in the file -->') !== -1,
+       'and it is still in the file, untouched');
+  }
+
+  heading('comments — adding one');
+  {
+    const before = QuickEditEditor.preview();
+    const region = QuickEditEditor.addCommentTo(document.getElementById('p3'));
+    ok(!!region, 'a comment was added');
+    eq(QuickEditEditor.preview(), before, 'an empty comment is not written to the file');
+
+    writeComment(region, 'needs a figure for Q3');
+    const after = QuickEditEditor.preview();
+    const diff = singleDiff(before, after);
+    eq(diff.removed, '', 'adding a comment REPLACES NOTHING — not one byte');
+    ok(after.indexOf('<!-- comment: needs a figure for Q3 -->\n  <p id="p3">') !== -1,
+       'it lands on its own line, immediately before the section it belongs to');
+
+    // The point of storing it this way: a browser shows none of it.
+    const rendered = new DOMParser().parseFromString(after, 'text/html');
+    const wasRendered = new DOMParser().parseFromString(before, 'text/html');
+    eq(rendered.querySelectorAll('#doc *').length,
+       wasRendered.querySelectorAll('#doc *').length,
+       'the visible document is unchanged — not one new element');
+    ok(rendered.body.textContent.indexOf('needs a figure for Q3') === -1,
+       'and the note is invisible to anyone reading the page');
+  }
+
+  heading('comments — editing and deleting');
+  {
+    const regions = QuickEditEditor.commentRegions();
+    const existing = regions.find((r) => r.original === 'this note was already in the file');
+
+    writeComment(existing, 'rewritten note');
+    const edited = QuickEditEditor.preview();
+    ok(edited.indexOf('<!-- comment: rewritten note -->') !== -1, 'an existing comment can be rewritten');
+    ok(edited.indexOf('this note was already in the file') === -1, 'the old text is gone');
+
+    QuickEditEditor.removeComment(existing);
+    const deleted = QuickEditEditor.preview();
+    ok(deleted.indexOf('<!-- comment: rewritten note -->') === -1, 'and it can be deleted');
+    ok(deleted.indexOf('<p id="p6">') !== -1, 'the section it was attached to stays');
+    ok(deleted.indexOf('\n\n  <p id="p6">') === -1,
+       'deleting takes the whole line, leaving no blank gap behind');
+
+    QuickEditEditor.undo();
+    ok(QuickEditEditor.preview().indexOf('<!-- comment: rewritten note -->') !== -1,
+       'undo brings a deleted comment back');
+    QuickEditEditor.undo();
+    ok(QuickEditEditor.preview().indexOf('this note was already in the file') !== -1,
+       'and undoing again puts its original wording back');
+    QuickEditEditor.redo();
+  }
+
+  heading('comments — a note that would break out of a comment');
+  {
+    const region = QuickEditEditor.addCommentTo(document.getElementById('p1'));
+    writeComment(region, 'see --> here, and a trailing dash-');
+    const out = QuickEditEditor.preview();
+
+    // Exactly one "-->" belongs to this comment: the one that closes it.
+    const start = out.indexOf('<!-- comment: see');
+    const body = out.slice(start, out.indexOf('-->', start) + 3);
+    ok(body.indexOf('-->') === body.length - 3,
+       'the note cannot close its own comment early');
+    ok(new DOMParser().parseFromString(out, 'text/html').getElementById('p1') !== null,
+       'and the document after it still parses');
   }
 
   heading('the file, end to end');
