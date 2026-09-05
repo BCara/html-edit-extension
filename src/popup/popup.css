@@ -78,3 +78,11 @@ details .sub { margin: 9px 0 2px; color: var(--fg); }
 }
 .foot:empty { display: none; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+
+.grant { margin-bottom: 11px; }
+.grant .actions { margin-bottom: 0; }
+.grant p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}

@@ -31,13 +31,26 @@
     "downloads"
   ],
 
-  // No "host_permissions" on purpose: activeTab covers the one tab in play.
-  // No "storage": nothing is persisted anywhere.
-  // No network permissions: the extension makes no network requests at all.
+  // Not requested up front, only asked for if it turns out to be needed.
   //
-  // Reading local files additionally requires the user to tick "Allow access to
-  // file URLs" on chrome://extensions. That is a user-granted toggle, not a
-  // manifest permission; the popup detects when it is off and explains it.
+  // A content script cannot read the file it is running on: in Manifest V3 its
+  // fetch() carries the PAGE's origin, and a file:// page is not allowed to
+  // read file:// URLs. The read therefore has to happen in the service worker,
+  // which needs host access to the file scheme.
+  //
+  // It is optional rather than required so that installing Quick Edit grants it
+  // nothing. If the service worker turns out to need it, the popup asks for it
+  // with a button and Chrome shows its own consent prompt. If it is refused, or
+  // if the service worker cannot read file URLs at all, the extension falls
+  // back to asking the user to choose the file — which needs no permission.
+  "optional_host_permissions": ["file:///*"],
+
+  // No "storage": nothing is persisted anywhere.
+  // No remote hosts: the extension makes no network requests at all.
+  //
+  // Reading local files ALSO requires the user to tick "Allow access to file
+  // URLs" on chrome://extensions. That is a separate, user-granted toggle, not
+  // a manifest permission; the popup detects when it is off and explains it.
 
   "background": {
     "service_worker": "src/background.js"

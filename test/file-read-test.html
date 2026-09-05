@@ -1,0 +1,82 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Quick Edit — file read constraints</title>
+<!--
+  This page is run WITHOUT --allow-file-access-from-files, unlike the other two
+  suites. It exists because of a bug that shipped: the content script read the
+  file with fetch(), the whole test suite ran with that flag, and so the suite
+  was green while the extension could not read a single file in a normal
+  browser.
+
+  What it pins down is the browser constraint itself. If these expectations ever
+  flip, the read chain in src/content.js should be revisited.
+-->
+<style>
+  body { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; }
+  h1 { font: 600 15px system-ui, sans-serif; margin: 0 0 1rem; }
+  #out { white-space: pre-wrap; }
+  .pass { color: #15803d; }
+  .fail { color: #b91c1c; font-weight: 700; }
+  .head { color: #4f46e5; font-weight: 700; display: block; margin-top: .9rem; }
+  #summary { margin-top: 1.2rem; padding-top: .8rem; border-top: 1px solid #ddd; font-weight: 700; }
+</style>
+<h1>Quick Edit — file read constraints</h1>
+<div id="out">Running…</div>
+<div id="summary"></div>
+
+<script src="report.js"></script>
+<script>
+'use strict';
+Report.mount('out', 'summary');
+const { ok, eq, heading, line } = Report;
+
+function attempt(fn) {
+  return Promise.resolve().then(fn).then(
+    (value) => ({ ok: true, value }),
+    (err) => ({ ok: false, message: String(err && err.message || err) })
+  );
+}
+
+async function run() {
+  heading('the page itself');
+  eq(location.protocol, 'file:', 'this suite runs from a file:// URL');
+  eq(window.isSecureContext, true, 'file:// is a secure context');
+
+  heading('a file:// page cannot read file:// URLs');
+  {
+    const viaFetch = await attempt(() => fetch(location.href).then((r) => r.text()));
+    ok(!viaFetch.ok,
+       'fetch() of the page\'s own URL is refused',
+       'it SUCCEEDED — either Chrome changed, or this suite was given ' +
+       '--allow-file-access-from-files, which defeats the point of the test');
+    if (!viaFetch.ok) line('pass', '        (' + viaFetch.message + ')');
+
+    const viaXhr = await attempt(() => new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('GET', location.href, true);
+      x.onload = () => resolve(x.responseText);
+      x.onerror = () => reject(new Error('status ' + x.status));
+      x.send();
+    }));
+    ok(!viaXhr.ok, 'XMLHttpRequest is refused for the same reason',
+       'it SUCCEEDED, so XHR is NOT equivalent to fetch here');
+  }
+
+  heading('what this means for the extension');
+  {
+    // A content script's fetch carries the page's origin, so the two results
+    // above are exactly what a content script would get. The read has to happen
+    // somewhere with the extension's own privileges, or be handed to us by the
+    // user.
+    ok(true, 'the file read cannot live in the content script — see src/content.js readSource()');
+    ok(true, 'routes are: service worker fetch, then page fetch, then the user picks the file');
+  }
+
+  Report.finish();
+}
+
+run().catch((err) => {
+  line('fail', '  FAIL  suite crashed — ' + (err && err.stack || err));
+  Report.finish();
+});
+</script>

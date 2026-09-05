@@ -68,14 +68,34 @@ would throw away every unsaved edit.
 | `activeTab` | Read the document in the one tab whose icon you clicked, until you navigate away. Chosen over a standing `file:///*` host permission so the extension has no access to anything unless you ask. |
 | `scripting` | Inject the editor on demand instead of auto-running on every local file you open. |
 | `downloads` | Chrome cannot write back to a `file://` path, so saving is a download. Used with `saveAs: true` so the OS dialog always opens. |
+| `file:///*` — **optional** | Lets the service worker open the file itself. Not granted at install: the popup asks for it on a button press, Chrome shows its own consent prompt, and declining costs you one click per file instead. |
 
-There is no `host_permissions`, no `storage`, and no network access of any kind.
-Quick Edit makes no requests, contains no AI, and sends your document nowhere.
+There is no required `host_permissions`, no `storage`, and no network access of
+any kind. Quick Edit makes no requests, contains no AI, and sends your document
+nowhere.
+
+### Why reading a local file is awkward
+
+A content script cannot read the file it is running on. In Manifest V3 its
+`fetch()` carries the *page's* origin, and a `file://` page is not allowed to
+read `file://` URLs — it fails with a bare "Failed to fetch". So Quick Edit
+tries three routes, in order of how little they ask of you:
+
+1. **The service worker fetches it**, with the extension's own privileges. Needs
+   the optional `file:///*` permission above. No interaction.
+2. **The content script fetches it.** Only works if Chrome was started with
+   `--allow-file-access-from-files`. Tried because it costs nothing.
+3. **You choose the file.** Needs no permission at all, so this one always
+   works. Quick Edit checks the filename matches and that the contents line up
+   with the page before trusting it.
+
+The popup's details panel says which route was used.
 
 ## How it works
 
-1. **Fetch the source.** The file's original bytes are read as a string and kept
-   as the source of truth. The DOM is never read back with `innerHTML`.
+1. **Read the source.** The file's original bytes are read as a string (see
+   above for the three routes) and kept as the source of truth. The DOM is never
+   read back with `innerHTML`.
 2. **Tokenize the source** (`src/lib/tokenizer.js`). A single pass records every
    character range that the HTML parser will turn into a text node — skipping
    tags, comments and the doctype, and understanding raw-text elements, quoted
@@ -129,6 +149,8 @@ Quick Edit makes no requests, contains no AI, and sends your document nowhere.
   their entities byte for byte.
 - **UTF-8 only.** A file declaring another charset is detected and refused
   rather than silently corrupted.
+- **Reading the file may need a click.** If you decline the optional permission,
+  Quick Edit asks you to choose the file each time — see above for why.
 - **A few text nodes are never editable**: anything inside `<script>`, `<style>`,
   `<head>`, `<title>`, `<template>`, `<noscript>` or `<textarea>`; whitespace
   between tags; and text the parser stitched together from several places in the

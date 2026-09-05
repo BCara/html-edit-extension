@@ -1,10 +1,19 @@
 /*
  * Quick Edit — service worker.
  *
- * Deliberately thin. It exists to do the three things a content script cannot:
+ * Deliberately thin. It exists to do the four things a content script cannot:
  *   - inject the editor into the active tab (chrome.scripting)
+ *   - READ THE FILE (see below)
  *   - start a download (chrome.downloads)
  *   - put a badge on the toolbar icon (chrome.action)
+ *
+ * On reading the file: this cannot be done from the content script. In
+ * Manifest V3 a content script's fetch() carries the *page's* origin, and a
+ * file:// page is not permitted to read file:// URLs — the request fails with
+ * a bare "Failed to fetch". (A page can only do it when Chrome is started with
+ * --allow-file-access-from-files, which nobody's browser is.) The service
+ * worker fetches with the extension's own privileges instead, which is the
+ * supported route.
  *
  * It holds no document state. The content script owns the source string and the
  * offset map, and the file text passes through here only on its way into a save
@@ -17,6 +26,7 @@ const INJECT_FILES = [
   'src/lib/mapping.js',
   'src/lib/splice.js',
   'src/lib/islands.js',
+  'src/lib/prompt.js',
   'src/editor.js',
   'src/content.js',
 ];
@@ -53,6 +63,30 @@ async function relay(type, extra) {
   if (code) return { ok: false, code, url: tab.url };
   await ensureInjected(tab.id);
   return await chrome.tabs.sendMessage(tab.id, Object.assign({ type }, extra));
+}
+
+/*
+ * Read a local file on behalf of the content script.
+ *
+ * Needs two separate things from the user, and they fail differently:
+ *   - "Allow access to file URLs" on chrome://extensions (checked before we
+ *     ever get here)
+ *   - host access to file:///*, which is an optional permission the popup asks
+ *     for on a button press
+ * If either is missing, or if this build of Chrome will not fetch file: URLs
+ * from a service worker at all, this returns ok:false and the content script
+ * falls back to asking the user to choose the file.
+ */
+async function readFile(url) {
+  const granted = await chrome.permissions.contains({ origins: ['file:///*'] });
+  if (!granted) return { ok: false, code: 'no-host-permission' };
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return { ok: false, code: 'http', message: 'HTTP ' + res.status };
+    return { ok: true, text: await res.text() };
+  } catch (err) {
+    return { ok: false, code: 'fetch-failed', message: String(err && err.message || err) };
+  }
 }
 
 function setBadge(tabId, active, unsaved) {
@@ -103,6 +137,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     setBadge(sender.tab && sender.tab.id, msg.active, msg.unsaved);
     sendResponse({ ok: true });
     return;
+  }
+
+  if (msg.type === 'quickEdit:readFile') {
+    readFile(msg.url).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === 'quickEdit:hasFilePermission') {
+    chrome.permissions.contains({ origins: ['file:///*'] })
+      .then(function (granted) { sendResponse({ ok: true, granted }); });
+    return true;
   }
 
   if (msg.type === 'quickEdit:download') {

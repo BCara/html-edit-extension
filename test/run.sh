@@ -27,8 +27,11 @@ fi
 # --allow-file-access-from-files lets the harnesses fetch() their fixtures and
 # read the iframes they load them into. It is a test-only flag; the extension
 # itself relies on the user's "Allow access to file URLs" toggle instead.
+# $3, if given, is passed to Chrome. Pages that need to fetch fixtures get
+# --allow-file-access-from-files; file-read-test.html deliberately does NOT,
+# because it is checking what a normal browser refuses to do.
 run_page() {
-  local page="$1" title="$2" dom="$WORK/$(basename "$page").dom.html"
+  local page="$1" title="$2" extra="${3:-}" dom="$WORK/$(basename "$page").dom.html"
 
   echo
   echo "== headless Chrome: $title =="
@@ -37,7 +40,7 @@ run_page() {
     --headless=new \
     --disable-gpu \
     --no-sandbox \
-    --allow-file-access-from-files \
+    $extra \
     --user-data-dir="$WORK/profile" \
     --virtual-time-budget=30000 \
     --dump-dom "file://$DIR/test/$page" > "$dom" 2>"$WORK/chrome.log"
@@ -55,8 +58,11 @@ run_page() {
   return "$status"
 }
 
-run_page mapping-test.html "offset mapping" || BROWSER_FAIL=1
-run_page editor-test.html "edit mode, end to end" || BROWSER_FAIL=1
+FLAG=--allow-file-access-from-files
+run_page mapping-test.html "offset mapping" "$FLAG" || BROWSER_FAIL=1
+run_page editor-test.html "edit mode, end to end" "$FLAG" || BROWSER_FAIL=1
+# No flag here, on purpose. See the comment in the page.
+run_page file-read-test.html "file read constraints (no flag)" || BROWSER_FAIL=1
 
 echo
 if [ -n "${BROWSER_FAIL:-}" ] || [ -n "${NODE_FAIL:-}" ]; then

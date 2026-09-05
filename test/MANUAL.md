@@ -46,6 +46,14 @@ badge.
 This is the step everyone forgets, so the extension is built to tell you about
 it rather than silently do nothing.
 
+There are **two separate permissions** here and they are easy to confuse:
+
+- **Allow access to file URLs** — a toggle on `chrome://extensions`. Without it
+  Quick Edit cannot touch local files at all. This section.
+- **`file:///*` host access** — an optional permission the popup asks for with a
+  button. Without it Quick Edit still works, but has to ask you to choose the
+  file each time. Section 3.
+
 1. Still on `chrome://extensions`, click **Details** under Quick Edit.
 2. Turn on **Allow access to file URLs**.
 
@@ -62,9 +70,31 @@ Now turn the setting on, reload the `simple.html` tab, and continue.
 
 ---
 
-## 3. Smoke test — can it see the file?
+## 3. The second permission
 
-With `simple.html` open, click the Quick Edit icon.
+With `simple.html` open and reloaded, click the Quick Edit icon.
+
+**Expected on the very first use:**
+
+```
+Nearly there. Chrome does not let extensions open local
+files until you say so.
+
+[ Allow direct file access ]  [ Choose it myself ]
+```
+
+Click **Allow direct file access**. Chrome shows its own consent prompt for
+`file:///*` — accept it.
+
+> **Both answers work, and I would like you to try the other one too.** If you
+> click *Choose it myself* — or decline Chrome's prompt — a card appears at the
+> bottom right of the *page* asking you to pick the file. Choose the same
+> `simple.html` and everything works identically from there. That route needs no
+> permission at all, which is why it exists.
+
+---
+
+## 4. Smoke test — can it see the file?
 
 **Expected:**
 
@@ -75,15 +105,19 @@ simple.html
 [ Start editing ]
 ```
 
-Expand **What Quick Edit found** — you should see counts for text nodes, source
-spans and a "Not editable" breakdown (whitespace, inside script/style/head).
+Expand **What Quick Edit found**. Alongside the counts there is a **Read via**
+row — this is the one I most want to hear about:
 
-> If you get *"Could not read the file"*, file access did not take effect.
-> Reload the page (the setting only applies to tabs loaded after you changed it).
+- `read directly` — the service worker opened the file. Best case.
+- `you chose the file by hand` — the service worker could not, and the picker
+  took over. Works fine, but tell me.
+
+> If you get *"Could not read the file"* and no picker card appears, something
+> is wrong: send me the message and whatever the page Console (F12) says.
 
 ---
 
-## 4. The headline test: no edits means no change
+## 5. The headline test: no edits means no change
 
 **This is the one that matters.** Everything else is a convenience; this is the
 promise.
@@ -122,7 +156,7 @@ git diff --no-index QE/test/fixtures/simple.html ~/Downloads/simple.html && echo
 
 ---
 
-## 5. Edit one word, and check only that word moved
+## 6. Edit one word, and check only that word moved
 
 1. Open `QE/test/fixtures/nested-inline.html`.
 2. Start editing. The first paragraph is
@@ -152,7 +186,7 @@ appearing in the diff.
 
 ---
 
-## 6. The tricky files
+## 7. The tricky files
 
 Same routine for each — edit one word in the paragraph named, save, diff.
 
@@ -172,7 +206,7 @@ file ~/Downloads/crlf.html          # macOS/Linux: should say "with CRLF line te
 
 ---
 
-## 7. Typing behaviour
+## 8. Typing behaviour
 
 On any fixture, in edit mode:
 
@@ -190,7 +224,7 @@ On any fixture, in edit mode:
 
 ---
 
-## 8. The unsaved-changes warning
+## 9. The unsaved-changes warning
 
 1. Make an edit. Do **not** save.
 2. Try to close the tab, or press F5.
@@ -201,7 +235,7 @@ On any fixture, in edit mode:
 
 ---
 
-## 9. Saving over the original (the real workflow)
+## 10. Saving over the original (the real workflow)
 
 1. Edit `simple.html`, click Save.
 2. In the dialog, navigate to `QE/test/fixtures/`, keep the name `simple.html`,
@@ -219,7 +253,7 @@ cd QE && git checkout test/fixtures/simple.html   # if you cloned it
 
 ---
 
-## 10. Which save path was used
+## 11. Which save path was used
 
 Open DevTools (F12) → Console **on the document tab**, then save.
 
@@ -233,7 +267,7 @@ file lands in Downloads with no dialog. Also worth telling me about.
 
 ---
 
-## 11. A big file
+## 12. A big file
 
 1. Open `QE/test/fixtures/large.html`. It is about 1 MB, 2,748 sections.
    It ships in the zip. If you cloned the repo instead, it is not committed —

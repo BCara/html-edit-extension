@@ -3,13 +3,13 @@
  *
  * Owns the document's original bytes and the offset map, and answers the
  * popup's requests. The editing itself lives in editor.js; this file is the
- * lifecycle and messaging layer.
+ * lifecycle, the file read, and the messaging layer.
  *
  * Note what is NOT done anywhere in this extension: reading the document back
  * out of the DOM with innerHTML or outerHTML. That would hand us Chrome's
  * re-serialisation of the file — tidied indentation, normalised attributes,
  * dropped comments — instead of what the user actually wrote. The file is only
- * ever produced by splicing the string fetched below.
+ * ever produced by splicing the string read below.
  */
 (function () {
   'use strict';
@@ -18,42 +18,93 @@
   window.__quickEditContentLoaded = true;
 
   var Editor = window.QuickEditEditor;
+  var Prompt = window.QuickEditPrompt;
 
   var state = {
     source: null,     // original file text, verbatim
     map: null,        // { records, stats }
     ready: false,
+    readVia: null,    // which of the three routes below actually worked
+    readError: null,  // why the earlier ones did not
   };
 
+  function send(message) {
+    return new Promise(function (resolve) {
+      try {
+        chrome.runtime.sendMessage(message, function (res) {
+          if (chrome.runtime.lastError) resolve({ ok: false, message: chrome.runtime.lastError.message });
+          else resolve(res || { ok: false, message: 'No response from the extension.' });
+        });
+      } catch (err) {
+        resolve({ ok: false, message: String(err && err.message || err) });
+      }
+    });
+  }
+
+  function filename() {
+    var name = decodeURIComponent(location.pathname.split('/').pop() || '');
+    return name || 'page.html';
+  }
+
   /*
-   * Read the file's original bytes.
+   * Read the file's original bytes. Three routes, in order of how little they
+   * ask of the user:
    *
-   * fetch() is tried first. XMLHttpRequest is kept as a fallback because
-   * file:// support differs between Chrome versions and content-script worlds,
-   * and an extension that cannot read the source has nothing to offer.
+   *   1. The service worker fetches it with the extension's own privileges.
+   *      Needs the optional file:///* host permission, which the popup offers
+   *      to request.
    *
-   * Decoded as UTF-8 (the default for both APIs). A file in another encoding
-   * would come back mangled; see the encoding check below.
+   *   2. This content script fetches it. Almost always fails, and it is worth
+   *      being precise about why: in Manifest V3 a content script's fetch
+   *      carries the PAGE's origin, and a file:// page may not read file://
+   *      URLs. It only works if Chrome was started with
+   *      --allow-file-access-from-files. Tried anyway because it costs nothing.
+   *
+   *   3. Ask the user to choose the file. Needs no permission of any kind and
+   *      therefore always works, at the cost of one click.
+   *
+   * Decoded as UTF-8 in every case.
    */
   function readSource(url) {
-    return fetch(url).then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.text();
-    }).catch(function (fetchErr) {
-      return new Promise(function (resolve, reject) {
-        try {
-          var xhr = new XMLHttpRequest();
-          xhr.open('GET', url, true);
-          xhr.responseType = 'text';
-          xhr.onload = function () { resolve(xhr.responseText); };
-          xhr.onerror = function () {
-            reject(new Error('Could not read the file (' + fetchErr.message + ').'));
-          };
-          xhr.send();
-        } catch (e) {
-          reject(new Error('Could not read the file (' + fetchErr.message + ').'));
-        }
+    return send({ type: 'quickEdit:readFile', url: url }).then(function (res) {
+      if (res && res.ok) {
+        state.readVia = 'service worker';
+        return res.text;
+      }
+      state.readError = res;
+      console.log('[Quick Edit] service worker could not read the file:', res);
+
+      return fetch(url).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.text();
+      }).then(function (text) {
+        state.readVia = 'page fetch';
+        return text;
+      }).catch(function (pageErr) {
+        console.log('[Quick Edit] page fetch could not read the file either:', pageErr.message);
+        return chooseSource();
       });
+    });
+  }
+
+  function chooseSource() {
+    var wanted = filename();
+    return Prompt.chooseFile({
+      title: 'Quick Edit needs to read this file',
+      body: 'Chrome will not let an extension open a local file on its own. ' +
+            'Choose this same file and Quick Edit can get to work.',
+      action: 'Choose ' + wanted,
+      validate: function (file) {
+        if (file.name.toLowerCase() !== wanted.toLowerCase()) {
+          return 'That is ' + file.name + ', but this page is ' + wanted + '.';
+        }
+        return null;
+      },
+    }).then(function (file) {
+      return file.text();
+    }).then(function (text) {
+      state.readVia = 'file picker';
+      return text;
     });
   }
 
@@ -73,9 +124,28 @@
     return null;
   }
 
-  function filename() {
-    var name = decodeURIComponent(location.pathname.split('/').pop() || '');
-    return name || 'page.html';
+  /*
+   * Sanity check on the source we ended up with.
+   *
+   * If the user picked the wrong file, or the page rewrote itself after loading,
+   * the source and the DOM will not line up and almost nothing will verify.
+   * Rather than present a document where three paragraphs out of forty happen to
+   * be editable, say so.
+   */
+  function coverageProblem(map) {
+    var candidates = 0;
+    var mapped = 0;
+    for (var i = 0; i < map.records.length; i++) {
+      var r = map.records[i];
+      if (r.editable) { candidates++; mapped++; continue; }
+      if (r.reason === 'whitespace' || r.reason === 'blocked-ancestor' ||
+          r.reason === 'raw-text' || r.reason === 'merged-spans') continue;
+      candidates++;
+    }
+    if (candidates === 0 || mapped / candidates >= 0.5) return null;
+    return 'This file does not match the page — only ' + mapped + ' of ' + candidates +
+           ' text regions line up. If you chose the file by hand, check it is the ' +
+           'same one; otherwise the page may have rewritten itself after loading.';
   }
 
   // The map is only meaningful once the parser has finished building the tree.
@@ -95,11 +165,17 @@
     }).then(function (source) {
       var problem = encodingProblem(source);
       if (problem) throw new Error(problem);
+
+      var map = window.QuickEditMap.build(source, document);
+      var mismatch = coverageProblem(map);
+      if (mismatch) throw new Error(mismatch);
+
       state.source = source;
-      state.map = window.QuickEditMap.build(source, document);
-      Editor.init({ source: source, map: state.map, filename: filename() });
+      state.map = map;
+      Editor.init({ source: source, map: map, filename: filename() });
       state.ready = true;
-      console.log('[Quick Edit]', state.map.stats.editable, 'editable regions', state.map.stats);
+      console.log('[Quick Edit] read via ' + state.readVia + ' —',
+                  map.stats.editable, 'editable regions', map.stats);
       return state;
     });
   }
@@ -116,6 +192,7 @@
       bytes: state.source.length,
       stats: state.map.stats,
       reasons: reasons,
+      readVia: state.readVia,
       editor: Editor.status(),
     };
     if (extra) for (var k in extra) out[k] = extra[k];
@@ -149,8 +226,14 @@
     if (!handler) return;
 
     handler(msg).then(sendResponse).catch(function (err) {
+      var message = String(err && err.message || err);
       console.warn('[Quick Edit]', err);
-      sendResponse({ ok: false, code: 'error', message: String(err && err.message || err) });
+      sendResponse({
+        ok: false,
+        code: message === 'cancelled' ? 'cancelled' : 'error',
+        message: message,
+        readError: state.readError,
+      });
     });
     return true;   // response is async
   });
