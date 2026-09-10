@@ -162,9 +162,9 @@
     if (!state.served) return Promise.resolve();
     return fetch(state.served.url, { method: 'OPTIONS', credentials: 'same-origin' })
       .then(function (r) {
-        var allow = (r.headers.get('Allow') || '') + ',' +
-                    (r.headers.get('Access-Control-Allow-Methods') || '');
-        state.served.canPut = /\bPUT\b/i.test(allow);
+        // See origins.js — the Allow header is the capability statement, and
+        // Access-Control-Allow-Methods emphatically is not.
+        state.served.canPut = window.QuickEditOrigins.acceptsWriteBack(r.headers);
       })
       .catch(function () { /* no answer is a "no" */ });
   }

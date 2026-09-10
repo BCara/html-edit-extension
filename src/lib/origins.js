@@ -99,10 +99,36 @@
 
   function isEditable(url) { return classify(url).kind !== null; }
 
+  /*
+   * Does an OPTIONS response say this resource implements PUT?
+   *
+   * `headers` is anything with a .get(name) — a fetch Response's Headers, or a
+   * plain stand-in in a test.
+   *
+   * ONLY the Allow header counts. Access-Control-Allow-Methods is deliberately
+   * ignored, and the distinction is the whole reason this function exists:
+   *
+   *   Allow                        RFC 9110 10.2.1 — the methods this resource
+   *                                actually implements. A capability.
+   *   Access-Control-Allow-Methods  which methods a CROSS-ORIGIN caller is
+   *                                permitted to attempt. A policy, and one that
+   *                                says nothing about whether they will work.
+   *
+   * The widely used `cors` middleware answers every OPTIONS with
+   * "GET,HEAD,PUT,PATCH,POST,DELETE" by default. Reading that as a capability
+   * makes every ordinary static file server look like it accepts write-backs,
+   * and the first save 404s.
+   */
+  function acceptsWriteBack(headers) {
+    if (!headers || typeof headers.get !== 'function') return false;
+    return /(^|,)\s*PUT\s*(,|$)/i.test(headers.get('Allow') || '');
+  }
+
   root.QuickEditOrigins = {
     classify: classify,
     isEditable: isEditable,
     isPrivateHost: isPrivateHost,
+    acceptsWriteBack: acceptsWriteBack,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = root.QuickEditOrigins;

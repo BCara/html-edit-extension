@@ -181,6 +181,10 @@
     'button.primary { background: #5b52f0; }',
     'button.primary:hover:not(:disabled) { background: #6d64ff; }',
     'button:disabled { opacity: .4; cursor: default; }',
+    // Undo and redo are used far more often than Save, and always as a pair,
+    // so they get the compact treatment and sit together behind a divider.
+    'button.icon { padding: 4px 8px; font-size: 14px; line-height: 1; }',
+    '.sep { width: 1px; align-self: stretch; margin: 2px 1px; background: rgba(255, 255, 255, .16); flex: none; }',
   ].join('\n');
 
   // --- small helpers ---------------------------------------------------------
@@ -747,13 +751,45 @@
     state.hoverBlock = null;
   }
 
-  // Leaving the block is only a hint: the pointer may be on its way to a button.
+  /*
+   * Leaving the block is only a hint: the pointer may be on its way to a button.
+   *
+   * The buttons sit ADD_BTN + ADD_GAP to the left of the text, so reaching them
+   * means crossing a strip of ordinary page that belongs to neither. Every
+   * mouseover in that strip lands on the document and reads as "gone". Two
+   * things keep the buttons where the user is aiming:
+   *
+   *   - a grace period long enough to cross 30px and land on a 22px target,
+   *     which 220ms was not; people who track a small control are slower than
+   *     people who already know where it is
+   *   - inApproachCorridor(), which does not start the countdown at all while
+   *     the pointer is in the strip beside the block it belongs to
+   *
+   * Together these mean the buttons go away when you leave, and stay when you
+   * are on your way to them.
+   */
   function requestHideAdd() {
     if (!state.add || !state.hoverBlock || state.addHideTimer) return;
     state.addHideTimer = setTimeout(function () {
       state.addHideTimer = 0;
       hideAdd();
-    }, 220);
+    }, 650);
+  }
+
+  /*
+   * Is the pointer in the dead strip between the hovered block and its buttons?
+   *
+   * The corridor is the block's own vertical band, widened a little for a
+   * diagonal approach, running from just past the buttons to the block's right
+   * edge. Inside it, nothing is hiding.
+   */
+  function inApproachCorridor(e) {
+    if (!state.hoverBlock) return false;
+    var r = state.hoverBlock.getBoundingClientRect();
+    if (!r.width && !r.height) return false;
+    var reach = ADD_BTN + ADD_GAP + 10;
+    return e.clientY >= r.top - 10 && e.clientY <= r.bottom + 10 &&
+           e.clientX >= r.left - reach && e.clientX <= r.right;
   }
 
   /*
@@ -794,10 +830,18 @@
     }
 
     var island = islandOf(e.target);
-    if (!island) { requestHideAdd(); return; }
+    if (!island) {
+      if (inApproachCorridor(e)) { clearAddHide(); return; }
+      requestHideAdd();
+      return;
+    }
 
     var block = Blocks.blockFor(island);
-    if (!block || !canAddAfter(block)) { requestHideAdd(); return; }
+    if (!block || !canAddAfter(block)) {
+      if (inApproachCorridor(e)) { clearAddHide(); return; }
+      requestHideAdd();
+      return;
+    }
     clearAddHide();
     if (block !== state.hoverBlock) showAddFor(block);
   }
@@ -1197,6 +1241,10 @@
         '<span class="label">Edit mode</span>' +
         '<span class="count"></span>' +
         '<span class="msg"></span>' +
+        '<span class="sep"></span>' +
+        '<button class="undo icon" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo" disabled>\u21b6</button>' +
+        '<button class="redo icon" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo" disabled>\u21b7</button>' +
+        '<span class="sep"></span>' +
         '<button class="save primary" disabled>Save</button>' +
         '<button class="done">Done</button>' +
       '</div>';
@@ -1207,9 +1255,15 @@
       host: host,
       count: shadow.querySelector('.count'),
       msg: shadow.querySelector('.msg'),
+      undo: shadow.querySelector('.undo'),
+      redo: shadow.querySelector('.redo'),
       save: shadow.querySelector('.save'),
       done: shadow.querySelector('.done'),
     };
+    // mousedown, not click: by click time the caret has already left the text
+    // the user was editing, and undo would restore it somewhere they cannot see.
+    ui.undo.addEventListener('mousedown', function (e) { e.preventDefault(); undo(); });
+    ui.redo.addEventListener('mousedown', function (e) { e.preventDefault(); redo(); });
     ui.save.addEventListener('click', function () { save(); });
     ui.done.addEventListener('click', function () { setActive(false); });
     state.ui = ui;
@@ -1239,11 +1293,16 @@
 
     state.ui.count.textContent = text;
     state.ui.save.disabled = unsaved === 0;
+    state.ui.undo.disabled = state.historyAt === 0;
+    state.ui.redo.disabled = state.historyAt >= state.history.length;
     // Saving in place and saving a copy are different enough acts that the
     // button should not use one word for both.
     if (state.served && state.served.canPut) {
       state.ui.save.textContent = 'Save to server';
       state.ui.save.title = 'Write this file back to ' + state.served.url;
+    } else {
+      state.ui.save.textContent = 'Save';
+      state.ui.save.title = '';
     }
   }
 
@@ -1454,6 +1513,14 @@
                    'Reload the page and make your edits again.',
         };
       }
+      // The route is not there. Either the Allow header was optimistic or it has
+      // been removed since the probe; either way this server does not do
+      // save-in-place, so stop offering it for the rest of the session rather
+      // than failing the same way on every save.
+      if (r.status === 404 || r.status === 405 || r.status === 501) {
+        state.served.canPut = false;
+        return { ok: false, unsupported: true, message: 'HTTP ' + r.status };
+      }
       if (!r.ok) return { ok: false, message: 'HTTP ' + r.status + ' ' + r.statusText };
 
       // Take the new validator so a second save in the same session is still
@@ -1502,11 +1569,15 @@
     var attempt = toServer
       ? saveToServer(text).then(function (res) {
           if (res.ok || res.conflict) return res;
-          // The server said no for a reason that is not a conflict. Do not lose
-          // the edits over it — fall back to the download and say what happened.
-          console.warn('[Quick Edit] write-back failed, falling back to a download:', res.message);
+          // The server said no. Do not lose the edits over it — fall back to
+          // the download. A missing route is an ordinary fact about the server,
+          // not a failure worth alarming anyone about; anything else is worth
+          // repeating back.
           return requestDownload(text).then(function (dl) {
-            if (dl && dl.ok) dl.fellBack = res.message;
+            if (dl && dl.ok) {
+              if (res.unsupported) dl.noRoute = true;
+              else dl.fellBack = res.message;
+            }
             return dl;
           });
         })
@@ -1526,6 +1597,8 @@
       var where;
       if (res.toServer) {
         where = 'Saved ' + state.filename + ' to the server';
+      } else if (res.noRoute) {
+        where = 'This server does not accept saves — downloaded ' + state.filename + ' instead';
       } else if (res.fellBack) {
         where = 'Server refused the save (' + res.fellBack + ') — downloaded instead';
       } else if (res.viaAnchor) {

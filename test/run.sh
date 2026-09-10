@@ -9,6 +9,10 @@ CHROME="${CHROME:-$(command -v google-chrome || command -v google-chrome-stable 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+echo "== node: origins and the write-back probe =="
+node "$DIR/src/lib/origins.test.js" || NODE_FAIL=1
+
+echo
 echo "== node: tokenizer + splice =="
 node "$DIR/test/node-test.js" || NODE_FAIL=1
 
