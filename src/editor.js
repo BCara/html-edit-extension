@@ -35,6 +35,7 @@
   var Splice = root.QuickEditSplice;
   var Blocks = root.QuickEditBlocks;
   var Comments = root.QuickEditComments;
+  var Structures = root.QuickEditStructures;
 
   var UI_ATTR = 'data-quick-edit-ui';
   var MODE_ATTR = 'data-qe-mode';
@@ -87,6 +88,7 @@
     map: null,
     filename: 'page.html',
     regions: [],
+    trees: [],            // inserted structures: one tree, many editable cells
     byIsland: null,
     byElement: null,      // blocks we added -> their region
     add: null,            // the hover controls
@@ -160,6 +162,7 @@
     '.bar {',
     '  font: 12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
     '  display: flex; align-items: center; gap: 9px;',
+    '  position: relative;',
     '  padding: 7px 8px 7px 13px;',
     '  border-radius: 999px;',
     '  background: rgba(22, 22, 27, .93);',
@@ -185,6 +188,26 @@
     // so they get the compact treatment and sit together behind a divider.
     'button.icon { padding: 4px 8px; font-size: 14px; line-height: 1; }',
     '.sep { width: 1px; align-self: stretch; margin: 2px 1px; background: rgba(255, 255, 255, .16); flex: none; }',
+    // The insert menu opens upward: the bar is pinned to the bottom right, so
+    // there is never room below it and always room above.
+    '.menu[hidden] { display: none; }',
+    '.menu {',
+    '  position: absolute; bottom: calc(100% + 8px); right: 0;',
+    '  min-width: 168px; padding: 5px;',
+    '  display: flex; flex-direction: column; gap: 2px;',
+    '  border-radius: 11px;',
+    '  background: rgba(22, 22, 27, .97);',
+    '  box-shadow: 0 4px 22px rgba(0, 0, 0, .42);',
+    '}',
+    '.menu button {',
+    '  border-radius: 7px; padding: 7px 10px; text-align: left;',
+    '  background: transparent; white-space: nowrap;',
+    '}',
+    '.menu button:hover:not(:disabled) { background: rgba(255, 255, 255, .16); }',
+    '.menu .hint {',
+    '  padding: 4px 10px 6px; color: #8f95a3; font-size: 11px; max-width: 20em;',
+    '  white-space: normal;',
+    '}',
   ].join('\n');
 
   // --- small helpers ---------------------------------------------------------
@@ -225,6 +248,10 @@
     for (var i = 0; i < state.regions.length; i++) {
       var r = state.regions[i];
       if (r.kind === 'insert' && !r.removed && !r.current) n++;
+    }
+    // A structure counts once, however many empty cells it has.
+    for (var t = 0; t < state.trees.length; t++) {
+      if (!state.trees[t].removed && !treeHasText(state.trees[t])) n++;
     }
     return n;
   }
@@ -377,6 +404,111 @@
 
   function addAfterIsland(island) {
     return addAfterBlock(Blocks.blockFor(island));
+  }
+
+  /*
+   * The block a new structure should go after: whatever the user is in, then
+   * whatever they are hovering, then the last block we can find an anchor for.
+   * Never nothing — the toolbar should not fail for want of a destination.
+   */
+  function currentBlock() {
+    var focused = islandOf(document.activeElement);
+    if (focused) {
+      var block = Blocks.blockFor(focused);
+      if (block && canAddAfter(block)) return block;
+    }
+    if (state.hoverBlock && canAddAfter(state.hoverBlock)) return state.hoverBlock;
+
+    var islands = document.querySelectorAll('[' + Islands.ATTR + ']');
+    for (var i = islands.length - 1; i >= 0; i--) {
+      var b = Blocks.blockFor(islands[i]);
+      if (b && canAddAfter(b)) return b;
+    }
+    return null;
+  }
+
+  /*
+   * Add a structure — a table, a list, a heading — after the current block.
+   *
+   * Unlike addAfterBlock, which owns one element holding one run of text, this
+   * owns a small tree holding several. The bookkeeping is arranged so the rest
+   * of the editor does not have to know the difference:
+   *
+   *   - each editable cell gets an ordinary region (kind 'cell'), so typing,
+   *     changed-marking, undo and the unsaved count work unaltered
+   *   - one tree region owns the anchor and the markup, and is shaped enough
+   *     like an added block that setAdded() moves it in and out for undo
+   *
+   * collectEdits skips the cells; collectStructureEdits emits the tree once.
+   */
+  function insertStructure(id) {
+    var block = currentBlock();
+    if (!block) { flash('Quick Edit cannot tell where to put that in the file'); return null; }
+
+    var anchor = anchorForBlock(block);
+    if (!anchor) { flash('Quick Edit cannot tell where this block ends in the file'); return null; }
+
+    var built = Structures.build(document, id, block);
+    if (!built) { flash('Quick Edit does not know how to add that'); return null; }
+
+    block.parentNode.insertBefore(built.element, block.nextSibling);
+
+    var tree = {
+      kind: 'tree',
+      id: id,
+      element: built.element,
+      island: built.islands[0],     // the one setAdded() puts the caret back in
+      islands: built.islands,
+      anchor: anchor,
+      // The indent of the line the structure starts on, so its inner lines can
+      // be laid out relative to it.
+      indent: anchor.before.replace(/^[\r\n]+/, ''),
+      cells: [],
+      removed: false,
+    };
+
+    for (var i = 0; i < built.islands.length; i++) {
+      var isl = built.islands[i];
+      var cell = {
+        kind: 'cell',
+        island: isl,
+        tree: tree,
+        // Carries the file's line-ending style into escaping, as for any region.
+        span: { raw: Blocks.newlineOf(state.source) },
+        original: '',
+        current: '',
+        saved: '',
+        removed: false,
+      };
+      tree.cells.push(cell);
+      state.regions.push(cell);
+      state.byIsland.set(isl, cell);
+    }
+
+    state.trees.push(tree);
+    // So adding a sibling to the structure itself anchors in the same place.
+    state.byElement.set(built.element, tree);
+
+    pushHistory({ kind: 'add', region: tree });
+
+    tree.island.focus();
+    Islands.setCaret(tree.island, 0);
+    hideAdd();
+    refresh();
+
+    var what = Structures.kindById(id);
+    flash(built.donor
+      ? 'Added a ' + what.label.toLowerCase() + ' like the one above'
+      : 'Added a plain ' + what.label.toLowerCase() + ' — this document had none to copy');
+    return tree;
+  }
+
+  // Has anything been typed into this structure at all?
+  function treeHasText(tree) {
+    for (var i = 0; i < tree.cells.length; i++) {
+      if (tree.cells[i].current) return true;
+    }
+    return false;
   }
 
   // A bullet or a numbered item — the one block Enter carries on from.
@@ -625,6 +757,15 @@
 
   function onKeyDown(e) {
     if (!state.active) return;
+
+    // Esc closes the insert menu, and is checked before the modifier gate
+    // below because it carries no modifier.
+    if (e.key === 'Escape' && isMenuOpen()) {
+      e.preventDefault();
+      setMenuOpen(false);
+      return;
+    }
+
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     var key = (e.key || '').toLowerCase();
 
@@ -822,6 +963,12 @@
     ui.host.style.setProperty('display', 'block', 'important');
   }
 
+  function onMouseDownAnywhere() {
+    // The bar's own handlers stopPropagation, so reaching here means the click
+    // was somewhere else.
+    if (isMenuOpen()) setMenuOpen(false);
+  }
+
   function onMouseOver(e) {
     if (!state.active) return;
     if (state.add && e.target === state.add.host) {   // over the buttons themselves
@@ -854,6 +1001,7 @@
     ['dragover', onDragOver, true],
     ['keydown', onKeyDown, true],
     ['mouseover', onMouseOver, true],
+    ['mousedown', onMouseDownAnywhere, false],
     ['click', onClick, true],
     ['submit', onSubmit, true],
   ];
@@ -1242,6 +1390,15 @@
         '<span class="count"></span>' +
         '<span class="msg"></span>' +
         '<span class="sep"></span>' +
+        '<button class="insert" title="Add a table, a list, a heading">Insert \u25be</button>' +
+        '<div class="menu" hidden>' +
+          Structures.KINDS.map(function (k) {
+            return '<button data-kind="' + k.id + '">' + k.label + '</button>';
+          }).join('') +
+          '<div class="hint">Copied from the nearest one already in the document, ' +
+          'so it matches.</div>' +
+        '</div>' +
+        '<span class="sep"></span>' +
         '<button class="undo icon" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo" disabled>\u21b6</button>' +
         '<button class="redo icon" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo" disabled>\u21b7</button>' +
         '<span class="sep"></span>' +
@@ -1255,6 +1412,8 @@
       host: host,
       count: shadow.querySelector('.count'),
       msg: shadow.querySelector('.msg'),
+      insert: shadow.querySelector('.insert'),
+      menu: shadow.querySelector('.menu'),
       undo: shadow.querySelector('.undo'),
       redo: shadow.querySelector('.redo'),
       save: shadow.querySelector('.save'),
@@ -1262,6 +1421,20 @@
     };
     // mousedown, not click: by click time the caret has already left the text
     // the user was editing, and undo would restore it somewhere they cannot see.
+    ui.insert.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setMenuOpen(ui.menu.hidden);
+    });
+    // mousedown, not click: the menu closes on the document's click, and by
+    // then this button no longer exists to have been clicked.
+    ui.menu.addEventListener('mousedown', function (e) {
+      var btn = e.target.closest && e.target.closest('button[data-kind]');
+      if (!btn) return;
+      e.preventDefault();
+      setMenuOpen(false);
+      insertStructure(btn.getAttribute('data-kind'));
+    });
+
     ui.undo.addEventListener('mousedown', function (e) { e.preventDefault(); undo(); });
     ui.redo.addEventListener('mousedown', function (e) { e.preventDefault(); redo(); });
     ui.save.addEventListener('click', function () { save(); });
@@ -1269,7 +1442,22 @@
     state.ui = ui;
   }
 
+  /*
+   * The insert menu. Closed by anything that is not it: a click elsewhere, Esc,
+   * leaving edit mode, or choosing something from it.
+   */
+  function setMenuOpen(open) {
+    if (!state.ui) return;
+    state.ui.menu.hidden = !open;
+    state.ui.insert.textContent = 'Insert ' + (open ? '\u25b4' : '\u25be');
+  }
+
+  function isMenuOpen() {
+    return !!(state.ui && !state.ui.menu.hidden);
+  }
+
   function removeStatusBar() {
+    setMenuOpen(false);
     clearAddHide();
     if (state.ui && state.ui.host.parentNode) state.ui.host.parentNode.removeChild(state.ui.host);
     state.ui = null;
@@ -1343,6 +1531,10 @@
       var region = state.byIsland.get(islands[i]);
       if (!region || region.removed) continue;
 
+      // A cell does not emit on its own: its tree emits all of them together,
+      // below, so a half-filled table still writes every cell it needs.
+      if (region.kind === 'cell') continue;
+
       if (region.kind === 'insert') {
         // An added block nobody typed into is not written at all.
         if (!region.current) continue;
@@ -1364,8 +1556,38 @@
       });
     }
 
+    collectStructureEdits(edits);
     collectCommentEdits(edits);
     return edits;
+  }
+
+  /*
+   * An inserted structure is a single zero-length splice: its whole tree,
+   * rendered from the cells the user typed into. One nobody typed anything into
+   * is not written at all, on the same grounds as an added block left empty.
+   */
+  function collectStructureEdits(edits) {
+    var newline = Blocks.newlineOf(state.source);
+
+    function textFor(island) {
+      var cell = state.byIsland.get(island);
+      return cell ? serialise(cell.current, cell.span) : '';
+    }
+
+    for (var i = 0; i < state.trees.length; i++) {
+      var tree = state.trees[i];
+      if (tree.removed || !treeHasText(tree)) continue;
+
+      edits.push({
+        start: tree.anchor.offset,
+        end: tree.anchor.offset,
+        replacement: tree.anchor.before + Structures.markup(tree.element, {
+          newline: newline,
+          indent: tree.indent,
+          text: textFor,
+        }) + tree.anchor.after,
+      });
+    }
   }
 
   /*
@@ -1689,6 +1911,7 @@
     preview: preview,
     serialise: serialise,
     addAfterIsland: addAfterIsland,
+    insertStructure: insertStructure,
     atEndOfBlock: atEndOfBlock,
     addCommentTo: addCommentTo,
     removeComment: removeComment,

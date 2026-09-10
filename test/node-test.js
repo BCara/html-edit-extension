@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-for (const f of ['../packages/html-splice/src/tokenizer.js', '../packages/html-splice/src/splice.js', 'lib/islands.js', 'lib/blocks.js', 'lib/comments.js', 'editor.js']) {
+for (const f of ['../packages/html-splice/src/tokenizer.js', '../packages/html-splice/src/splice.js', 'lib/islands.js', 'lib/blocks.js', 'lib/structures.js', 'lib/comments.js', 'editor.js']) {
   vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'), { filename: f });
 }
 const { tokenize } = globalThis.QuickEditTokenizer;

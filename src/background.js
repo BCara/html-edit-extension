@@ -33,6 +33,7 @@ const INJECT_FILES = [
   'packages/html-splice/src/splice.js',
   'src/lib/islands.js',
   'src/lib/blocks.js',
+  'src/lib/structures.js',
   'src/lib/comments.js',
   'src/lib/prompt.js',
   'src/editor.js',

@@ -24,10 +24,11 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.3.0';
+  var VERSION = '0.4.0';
   var REQUIRED = [
     'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
-    'QuickEditIslands', 'QuickEditBlocks', 'QuickEditComments', 'QuickEditPrompt', 'QuickEditEditor',
+    'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
+    'QuickEditComments', 'QuickEditPrompt', 'QuickEditEditor',
   ];
 
   function missingModules() {

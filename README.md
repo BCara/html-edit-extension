@@ -59,9 +59,12 @@ You can add another one of something: another paragraph after a paragraph,
 another bullet after a bullet, another heading after a heading. Three ways, all
 equivalent:
 
-- **Enter** with the caret at the very end of a block
-- **`Ctrl`/`Cmd` + `Enter`** from anywhere in it
-- the small **`+`** that appears just below a block when you hover it
+- **`Ctrl`/`Cmd` + `Enter`** from anywhere in the block
+- the small **`+`** that appears in the margin beside a block when you hover it
+- **Enter** at the very end of a **list item**, which starts the next one
+
+Enter elsewhere breaks the line rather than starting a new block, because inside
+a paragraph that is nearly always what was meant.
 
 The new block copies its neighbour's tag and `class`, so it looks the same, and
 lands with the same indentation. It does *not* copy the `id` — two elements with
@@ -69,6 +72,28 @@ one id would be invalid — or any other attribute.
 
 An added block you never type into is not written to the file at all. The status
 bar counts them so they do not disappear on you silently.
+
+### Adding a table, a list, a heading
+
+**Insert** in the status bar offers a table, a bullet or numbered list, a
+heading, a paragraph or a quote. It goes in after whatever you were last typing
+in.
+
+Each one is **copied from the nearest one already in the document**. A table
+takes that table's `class` and its column count, and gets a header row only if
+the one it was copied from has one. That is not a shortcut — it is the only way
+the result can be expected to look right. The document's stylesheet is not
+Quick Edit's to touch, so an inserted element has to be the kind of element the
+stylesheet already has an opinion about.
+
+Where the document has nothing of that kind to copy, you get a plain one with no
+class, which will look like whatever the document does to a bare `<table>` —
+possibly nothing. That is the honest outcome: guessing at CSS would make Quick
+Edit responsible for how your document looks, which it has always refused to be.
+
+As with an added block, a structure you type nothing into anywhere is not
+written to the file. One you type into is written whole, so a table with one
+filled cell still gets all its cells.
 
 ### Comments
 
@@ -195,10 +220,12 @@ offset.
 
 **By design**
 
-- **Text, blocks and comments.** You can change words, add another block like one
-  that is already there, and attach comments. You cannot move, delete or resize
-  elements, change CSS, classes, attributes or styles, or replace images. That
-  restraint is the feature; the additions were made deliberately, after the fact.
+- **Text, blocks, structures and comments.** You can change words, add another
+  block like one that is already there, insert a table or list copied from one
+  the document already has, and attach comments. You cannot move, delete or
+  resize elements, change CSS, classes, attributes or styles, or replace images.
+  That restraint is the feature; each addition was made deliberately, after the
+  fact, and each one still only ever *adds*.
 - **No overwrite in place.** Chrome cannot write to a `file://` path. See
   [Using it](#using-it).
 - **Private addresses only.** `file://`, plus http(s) on loopback, RFC1918,
@@ -216,8 +243,9 @@ offset.
   where documents-served-as-files actually live; public origins are
   overwhelmingly applications. See `src/lib/origins.js`.
 - **The only markup Quick Edit writes** is a `<br>` from a line break, the blocks
-  you explicitly add, and the `<!-- comment: -->` notes you write. All of it
-  appears only where you asked for it.
+  and structures you explicitly add, and the `<!-- comment: -->` notes you
+  write. All of it appears only where you asked for it, and none of it is ever
+  produced by re-serialising something you wrote.
 - **The comment margin moves the page over** while it is open, by widening the
   page's right padding. It is put back when you leave edit mode, and the file
   never hears about it — but on an unusual layout it may look odd while open.
@@ -278,6 +306,7 @@ src/background.js       service worker: injection, downloads, toolbar badge
 src/content.js          reads the source, builds the map, routes messages
 src/editor.js           edit mode: constraints, history, status bar, saving
 src/lib/origins.js      which documents Quick Edit will touch, and why
+src/lib/structures.js   inserted tables and lists, cloned from the document
 src/lib/mapping.js      character ranges <-> DOM text nodes, verified
 src/lib/islands.js      the contenteditable wrappers and their values
 src/lib/blocks.js       where an added block goes, and what it looks like
