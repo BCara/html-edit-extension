@@ -313,4 +313,9 @@
   function tokenize(source) { return scan(source).spans; }
 
   root.QuickEditTokenizer = { scan: scan, tokenize: tokenize, readTag: readTag };
+
+  // CommonJS, for use outside a browser. The browser global above is what the
+  // Chrome extension's injected scripts bind to; `module` is undefined there,
+  // so this is skipped and nothing changes for them.
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.QuickEditTokenizer;
 })(typeof self !== 'undefined' ? self : globalThis);

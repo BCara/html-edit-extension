@@ -17,10 +17,11 @@
  * Two things here do write markup the file did not have, both only ever where
  * the user asked for them:
  *
- *   - Enter inside a run of text inserts a <br>.
- *   - Enter at the end of a block, Ctrl/Cmd+Enter, or the "+" that appears on
- *     hover adds an empty sibling block — another <p> after a <p>, another <li>
- *     after an <li> — carrying the same tag and class and nothing else.
+ *   - Enter inserts a <br>. It stays inside the block it was pressed in: a
+ *     paragraph gets a new line, not a new paragraph.
+ *   - Enter at the end of a list item, Ctrl/Cmd+Enter, or the "+" that appears
+ *     on hover adds an empty sibling block — another <p> after a <p>, another
+ *     <li> after an <li> — carrying the same tag and class and nothing else.
  *
  * An added block is a ZERO-LENGTH splice at a known offset, so it displaces
  * nothing: every byte that was in the file is still in the file. An added block
@@ -90,6 +91,7 @@
     byElement: null,      // blocks we added -> their region
     add: null,            // the hover controls
     hoverBlock: null,
+    addHideTimer: 0,      // grace period while the pointer crosses to the buttons
     comments: [],         // comment regions, existing and new
     rail: null,           // the margin the cards live in
     railRendering: false, // guards the blur fired by rebuilding the cards
@@ -373,9 +375,14 @@
     return addAfterBlock(Blocks.blockFor(island));
   }
 
+  // A bullet or a numbered item — the one block Enter carries on from.
+  function isListItem(block) {
+    return !!block && block.localName === 'li';
+  }
+
   // True when the caret sits at the very end of the last run of text in its
-  // block — the point at which Enter should start a new block rather than
-  // break the line.
+  // block — the point at which Enter in a list item starts the next one rather
+  // than breaking the line.
   function atEndOfBlock(island) {
     var value = Islands.readValue(island);
     if (Islands.caretIndex(island) !== value.length) return false;
@@ -507,9 +514,14 @@
 
     if (type === 'insertParagraph' || type === 'insertLineBreak') {
       e.preventDefault();
-      // Enter at the end of a block starts a new one; anywhere else it breaks
-      // the line. Shift+Enter (insertLineBreak) always breaks the line.
-      if (type === 'insertParagraph' && atEndOfBlock(island) && canAddAfter(Blocks.blockFor(island))) {
+      // Enter breaks the line, the way a paragraph of prose wants it. The one
+      // exception is a list item, where the next thing after finishing a bullet
+      // is the next bullet. Every other kind of block gets a sibling from
+      // Ctrl/Cmd+Enter or the "+" instead, which is explicit enough not to
+      // surprise anyone mid-sentence.
+      var block = Blocks.blockFor(island);
+      if (type === 'insertParagraph' && isListItem(block) &&
+          atEndOfBlock(island) && canAddAfter(block)) {
         addAfterIsland(island);
       } else {
         insertPlain(island, '\n');
@@ -651,21 +663,33 @@
 
   // --- the "+" that appears on hover -----------------------------------------
 
+  var ADD_BTN = 22;   // button diameter
+  var ADD_GAP = 8;    // breathing room between the buttons and the text
+
   var ADD_CSS = [
     ':host { all: initial; }',
-    '.row { display: flex; gap: 4px; }',
+    '.row { display: flex; gap: 5px; }',
+    // In the margin the pair stacks, so it needs one button's width, not two.
+    '.row.stack { flex-direction: column; }',
+    // Sitting over the text is the fallback, so there it carries its own backing.
+    '.row.over {',
+    '  background: #fff; border-radius: 999px; padding: 3px;',
+    '  box-shadow: 0 1px 6px rgba(0, 0, 0, .35);',
+    '}',
     'button {',
-    '  font: 600 13px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
-    '  width: 18px; height: 18px; padding: 0;',
+    '  font: 600 15px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
+    '  width: 22px; height: 22px; padding: 0;',
     '  display: flex; align-items: center; justify-content: center;',
     '  border: 0; border-radius: 50%; cursor: pointer;',
-    '  color: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, .3);',
-    '  opacity: .75;',
+    '  color: #fff;',
+    // A white ring, so they read against a dark page as well as a light one.
+    '  box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0, 0, 0, .35);',
     '}',
-    'button:hover { opacity: 1; }',
+    '.row.over button { box-shadow: none; }',
+    'button:hover { filter: brightness(1.15); }',
     'button.block { background: #5b52f0; }',
     'button.note { background: #d9a01e; }',
-    'svg { width: 10px; height: 10px; fill: currentColor; display: block; }',
+    'svg { width: 12px; height: 12px; fill: currentColor; display: block; }',
   ].join('\n');
 
   function ensureAddButton() {
@@ -700,18 +724,43 @@
       if (state.hoverBlock) addCommentTo(state.hoverBlock);
     });
 
+    // The buttons stand off the block now, so the pointer has to cross a sliver
+    // of page to reach them; don't take them away while it is in flight.
+    host.addEventListener('mouseenter', clearAddHide);
+    host.addEventListener('mouseleave', requestHideAdd);
+
     document.documentElement.appendChild(host);
-    state.add = { host: host };
+    state.add = { host: host, row: shadow.querySelector('.row') };
     return state.add;
   }
 
+  function clearAddHide() {
+    if (state.addHideTimer) {
+      clearTimeout(state.addHideTimer);
+      state.addHideTimer = 0;
+    }
+  }
+
   function hideAdd() {
+    clearAddHide();
     if (state.add) state.add.host.style.setProperty('display', 'none', 'important');
     state.hoverBlock = null;
   }
 
+  // Leaving the block is only a hint: the pointer may be on its way to a button.
+  function requestHideAdd() {
+    if (!state.add || !state.hoverBlock || state.addHideTimer) return;
+    state.addHideTimer = setTimeout(function () {
+      state.addHideTimer = 0;
+      hideAdd();
+    }, 220);
+  }
+
   /*
-   * Park the + in the gap just below the block, at its left edge. Positioned in
+   * Park the buttons in the page's left margin, level with the block's first
+   * line, so they never sit on the words. A block hard against the left edge
+   * has no margin to use, and there falls back to a pill straddling the top
+   * edge — opaque, so it reads over whatever is underneath. Positioned in
    * document coordinates so it stays put while the page scrolls.
    */
   function showAddFor(block) {
@@ -719,21 +768,37 @@
     var rect = block.getBoundingClientRect();
     if (!rect.width && !rect.height) { hideAdd(); return; }
 
+    clearAddHide();
     state.hoverBlock = block;
-    ui.host.style.setProperty('left', (rect.left + window.scrollX) + 'px', 'important');
-    ui.host.style.setProperty('top', (rect.bottom + window.scrollY - 9) + 'px', 'important');
+
+    var left = rect.left + window.scrollX;
+    var top = rect.top + window.scrollY;
+    if (left >= ADD_BTN + ADD_GAP + 4) {
+      ui.row.className = 'row stack';
+      left -= ADD_BTN + ADD_GAP;
+    } else {
+      ui.row.className = 'row over';
+      if (top >= ADD_BTN + 6) top -= ADD_BTN + 6;
+    }
+
+    ui.host.style.setProperty('left', left + 'px', 'important');
+    ui.host.style.setProperty('top', top + 'px', 'important');
     ui.host.style.setProperty('display', 'block', 'important');
   }
 
   function onMouseOver(e) {
     if (!state.active) return;
-    if (state.add && e.target === state.add.host) return;   // over the + itself
+    if (state.add && e.target === state.add.host) {   // over the buttons themselves
+      clearAddHide();
+      return;
+    }
 
     var island = islandOf(e.target);
-    if (!island) { hideAdd(); return; }
+    if (!island) { requestHideAdd(); return; }
 
     var block = Blocks.blockFor(island);
-    if (!block || !canAddAfter(block)) { hideAdd(); return; }
+    if (!block || !canAddAfter(block)) { requestHideAdd(); return; }
+    clearAddHide();
     if (block !== state.hoverBlock) showAddFor(block);
   }
 
@@ -1151,6 +1216,7 @@
   }
 
   function removeStatusBar() {
+    clearAddHide();
     if (state.ui && state.ui.host.parentNode) state.ui.host.parentNode.removeChild(state.ui.host);
     state.ui = null;
     if (state.add && state.add.host.parentNode) {
@@ -1173,6 +1239,12 @@
 
     state.ui.count.textContent = text;
     state.ui.save.disabled = unsaved === 0;
+    // Saving in place and saving a copy are different enough acts that the
+    // button should not use one word for both.
+    if (state.served && state.served.canPut) {
+      state.ui.save.textContent = 'Save to server';
+      state.ui.save.title = 'Write this file back to ' + state.served.url;
+    }
   }
 
   function flash(message) {
@@ -1346,6 +1418,57 @@
   }
 
   /*
+   * Write the document back to the server it came from.
+   *
+   * Only ever reached for an http(s) document whose server answered OPTIONS
+   * with PUT in its Allow header, so this is not a probe — it is the save.
+   *
+   * The write is CONDITIONAL. If the server gave us an ETag or a Last-Modified
+   * when we read the document, it comes back as If-Match / If-Unmodified-Since,
+   * and a server that honours it returns 412 rather than letting this save
+   * overwrite a change made by someone else in the meantime. That is the one
+   * thing a save-in-place can get catastrophically wrong, and it costs a header
+   * to prevent.
+   *
+   * Anything other than success falls back to the download path rather than
+   * losing the user's edits: a 405 means the route was removed since the probe,
+   * a 5xx or a dropped connection means the server is unwell, and in every case
+   * the user still gets their file.
+   */
+  function saveToServer(text) {
+    var headers = { 'Content-Type': 'text/html; charset=utf-8' };
+    if (state.served.etag) headers['If-Match'] = state.served.etag;
+    else if (state.served.lastModified) headers['If-Unmodified-Since'] = state.served.lastModified;
+
+    return fetch(state.served.url, {
+      method: 'PUT',
+      headers: headers,
+      body: text,
+      credentials: 'same-origin',
+    }).then(function (r) {
+      if (r.status === 412) {
+        return {
+          ok: false,
+          conflict: true,
+          message: 'the file changed on the server since you opened it. ' +
+                   'Reload the page and make your edits again.',
+        };
+      }
+      if (!r.ok) return { ok: false, message: 'HTTP ' + r.status + ' ' + r.statusText };
+
+      // Take the new validator so a second save in the same session is still
+      // conditional, and still refuses to clobber.
+      var etag = r.headers.get('ETag');
+      if (etag) state.served.etag = etag;
+      var lm = r.headers.get('Last-Modified');
+      if (lm) state.served.lastModified = lm;
+      return { ok: true, toServer: true };
+    }).catch(function (err) {
+      return { ok: false, message: String(err && err.message || err) };
+    });
+  }
+
+  /*
    * The exact bytes that would be saved right now: the original source with
    * only the changed regions spliced. With no changes this returns the source
    * itself, unchanged, which is the guarantee the whole extension rests on.
@@ -1372,20 +1495,44 @@
     var snapshot = state.regions.map(function (r) { return { region: r, value: r.current }; })
       .concat(state.comments.map(function (r) { return { region: r, value: r.text.trim() }; }));
     var skipped = emptyAddedCount() + emptyCommentCount();
-    flash('Saving…');
 
-    return requestDownload(text).then(function (res) {
+    var toServer = !!(state.served && state.served.canPut);
+    flash(toServer ? 'Saving to the server…' : 'Saving…');
+
+    var attempt = toServer
+      ? saveToServer(text).then(function (res) {
+          if (res.ok || res.conflict) return res;
+          // The server said no for a reason that is not a conflict. Do not lose
+          // the edits over it — fall back to the download and say what happened.
+          console.warn('[Quick Edit] write-back failed, falling back to a download:', res.message);
+          return requestDownload(text).then(function (dl) {
+            if (dl && dl.ok) dl.fellBack = res.message;
+            return dl;
+          });
+        })
+      : requestDownload(text);
+
+    return attempt.then(function (res) {
       if (!res || !res.ok) {
-        flash('Save failed: ' + ((res && res.message) || 'unknown error'));
+        flash(res && res.conflict
+          ? 'Not saved — ' + res.message
+          : 'Save failed: ' + ((res && res.message) || 'unknown error'));
         return;
       }
       for (var i = 0; i < snapshot.length; i++) snapshot[i].region.saved = snapshot[i].value;
       renderRail();
       refresh();
 
-      var where = res.viaAnchor
-        ? 'Saved to your Downloads folder as ' + state.filename
-        : 'Saved ' + state.filename + ' — the original file is unchanged';
+      var where;
+      if (res.toServer) {
+        where = 'Saved ' + state.filename + ' to the server';
+      } else if (res.fellBack) {
+        where = 'Server refused the save (' + res.fellBack + ') — downloaded instead';
+      } else if (res.viaAnchor) {
+        where = 'Saved to your Downloads folder as ' + state.filename;
+      } else {
+        where = 'Saved ' + state.filename + ' — the original file is unchanged';
+      }
       flash(skipped
         ? where + ' (' + skipped + ' empty left out)'
         : where);
@@ -1432,6 +1579,9 @@
     state.source = options.source;
     state.map = options.map;
     state.filename = options.filename || 'page.html';
+    // null for a file:// document; for a served one, where to PUT it back and
+    // the validators that make the write conditional. See saveToServer().
+    state.served = options.served || null;
     // Registered once and left in place: unsaved edits still exist after edit
     // mode is switched off, and losing them to a stray navigation would be the
     // worst thing this extension could do.
@@ -1454,6 +1604,7 @@
       emptyComments: emptyCommentCount(),
       canUndo: state.historyAt > 0,
       canRedo: state.historyAt < state.history.length,
+      writeBack: state.served && state.served.canPut ? 'server' : 'download',
     };
   }
 

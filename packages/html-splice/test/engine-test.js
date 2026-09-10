@@ -1,25 +1,22 @@
 /*
- * Quick Edit — tokenizer and splice unit tests.
+ * html-text-splice — test suite.
  *
- * These cover the parts that need no DOM, so they run instantly in node and
- * pin down the fiddly offset arithmetic on its own. The claims that involve the
- * real HTML parser live in harness.js.
+ * Everything here runs in plain node against the published entry point, so it
+ * is also the worked example: if you are evaluating this library, this file is
+ * the fastest way to see what it promises and what it refuses to do.
+ *
+ *   node test/engine-test.js
+ *
+ * The two guarantees the whole library exists to make are pinned in
+ * "byte preservation" at the bottom, against real files.
  */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
-
-for (const f of ['../packages/html-splice/src/tokenizer.js', '../packages/html-splice/src/splice.js', 'lib/islands.js', 'lib/blocks.js', 'lib/comments.js', 'editor.js']) {
-  vm.runInThisContext(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'), { filename: f });
-}
-const { tokenize } = globalThis.QuickEditTokenizer;
-const { escapeText, applyEdits, replacementFor } = globalThis.QuickEditSplice;
-const { BR } = globalThis.QuickEditIslands;
-const { serialise } = globalThis.QuickEditEditor;
-const Blocks = globalThis.QuickEditBlocks;
-const Comments = globalThis.QuickEditComments;
+const {
+  scan, tokenize, applyEdits, escapeText, replacementFor, replaceSpans, verify,
+} = require('../index.js');
 
 let pass = 0, fail = 0;
 function ok(cond, name, detail) {
@@ -37,10 +34,6 @@ function section(t) { console.log('\n' + t); }
 
 // Compact view of a tokenization: the raw text of each span.
 const raws = (src) => tokenize(src).map((s) => s.raw);
-// Every span must quote the source at its own offsets.
-function selfConsistent(src) {
-  return tokenize(src).every((s) => src.slice(s.start, s.end) === s.raw);
-}
 
 section('tokenizer — basics');
 deq(raws('<p>Hello</p>'), ['Hello'], 'simple element text');
@@ -105,7 +98,7 @@ for (const src of [
   '<div>éà你好 🚀 emoji and accents</div>',
   '<p>&amp;&nbsp;&lt;</p><script>a<b</script><pre>\nx</pre>',
 ]) {
-  ok(selfConsistent(src), 'spans quote the source: ' + JSON.stringify(src.slice(0, 40)));
+  ok(verify(src), 'spans quote the source: ' + JSON.stringify(src.slice(0, 40)));
 }
 {
   // Non-ASCII must not shift offsets: JS string offsets are UTF-16 code units
@@ -114,6 +107,19 @@ for (const src of [
   const spans = tokenize(src);
   eq(src.slice(spans[0].start, spans[0].end), 'café', 'accented text offsets');
   eq(src.slice(spans[1].start, spans[1].end), '🚀 rocket', 'astral-plane text offsets');
+}
+
+section('scan — tags and comments, for callers pairing spans with a real tree');
+{
+  const { spans, tags, comments } = scan('<div><p>a</p><!--note--></div>');
+  deq(spans.map((s) => s.raw), ['a'], 'one text span');
+  deq(tags.map((t) => (t.isEnd ? '/' : '') + t.name), ['div', 'p', '/p', '/div'],
+      'tags in source order, nothing inferred about nesting');
+  eq(comments.length, 1, 'the comment is recorded');
+  eq(comments[0].data, 'note', 'with its content');
+  eq(comments[0].bogus, false, 'and marked as a real comment');
+  eq(scan('<![if !IE]>x')[Symbol.iterator] === undefined, true, 'scan returns an object');
+  eq(scan('<![if !IE]>x').comments[0].bogus, true, 'a downlevel construct is marked bogus');
 }
 
 section('escaping');
@@ -158,13 +164,33 @@ eq(applyEdits('abcdef', [{ start: 3, end: 3, replacement: '!' }]), 'abc!def', 'a
   ok(threw, 'an out-of-bounds range is refused');
 }
 
-section('splice — against the real fixtures');
+section('replaceSpans — the high-level call');
+{
+  const src = '<p class=lead>Hello</p>\n<p>Goodbye</p>\n';
+  const spans = tokenize(src);
+  eq(replaceSpans(src, [{ span: spans[0], text: 'Good morning' }]),
+     '<p class=lead>Good morning</p>\n<p>Goodbye</p>\n',
+     'the unquoted attribute, the newlines and the untouched paragraph all survive');
+  eq(replaceSpans(src, []), src, 'no changes is byte-identical');
+  eq(replaceSpans(src, [{ span: spans[0], text: 'a < b & c' }]),
+     '<p class=lead>a &lt; b &amp; c</p>\n<p>Goodbye</p>\n',
+     'typed markup characters are escaped, not honoured');
+
+  const crlf = '<p>one</p>\r\n<p>two</p>\r\n';
+  const both = tokenize(crlf);
+  eq(replaceSpans(crlf, [{ span: both[0], text: 'x' }]), '<p>x</p>\r\n<p>two</p>\r\n',
+     'a CRLF document keeps its line endings');
+}
+
+section('byte preservation — against real files');
 {
   const dir = path.join(__dirname, 'fixtures');
-  for (const name of fs.readdirSync(dir).filter((f) => f.endsWith('.html'))) {
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.html'));
+  ok(files.length > 0, 'there are fixtures to check');
+  for (const name of files) {
     const src = fs.readFileSync(path.join(dir, name), 'utf8');
     ok(applyEdits(src, []) === src, name + ': no edits is byte-identical');
-    ok(selfConsistent(src), name + ': every span quotes the source exactly');
+    ok(verify(src), name + ': every span quotes the source exactly');
     // Rewriting every span with its own raw text must reproduce the file exactly.
     const same = applyEdits(src, tokenize(src).map(
       (s) => ({ start: s.start, end: s.end, replacement: s.raw })));
@@ -172,104 +198,7 @@ section('splice — against the real fixtures');
   }
 }
 
-section('write-back — island values become source text');
-{
-  const lf = { raw: 'x' };
-  const crlf = { raw: 'a\r\nb' };
-
-  eq(serialise('just words', lf), 'just words', 'plain text passes straight through');
-  eq(serialise('Smith & Sons', lf), 'Smith &amp; Sons', 'a typed ampersand is encoded');
-  eq(serialise('5 < 6 > 2', lf), '5 &lt; 6 &gt; 2', 'typed angle brackets are encoded');
-
-  // Enter is the one thing that can add markup, and this is where it happens.
-  eq(serialise('one' + BR + 'two', lf), 'one<br>two', 'a line break becomes a <br>');
-  eq(serialise('a' + BR + BR + 'b', lf), 'a<br><br>b', 'consecutive line breaks');
-  eq(serialise(BR + 'leading', lf), '<br>leading', 'a leading line break');
-  eq(serialise('trailing' + BR, lf), 'trailing<br>', 'a trailing line break');
-  eq(serialise('a < b' + BR + 'c & d', lf), 'a &lt; b<br>c &amp; d',
-     'escaping and line breaks together');
-
-  eq(serialise('', lf), '', 'an emptied region writes nothing at all');
-  eq(serialise('multi\nline', crlf), 'multi\r\nline',
-     'existing newlines keep the file\'s CRLF style');
-  eq(serialise('a' + BR + 'b', crlf), 'a<br>b',
-     'a <br> is a tag, not a line ending, so CRLF does not apply to it');
-}
-
-section('adding a block — indent, line endings and markup');
-{
-  const src = '<div>\n  <p>one</p>\n  <p>two</p>\n</div>';
-  eq(Blocks.newlineOf(src), '\n', 'an LF file');
-  eq(Blocks.newlineOf('a\r\nb'), '\r\n', 'a CRLF file');
-
-  // Offset 8 is the '<' of the first <p>, which sits after two spaces.
-  eq(Blocks.indentOf(src, src.indexOf('<p>one')), '  ',
-     'the indent of the line the block starts on');
-  eq(Blocks.indentOf('<p>x</p>', 0), '', 'no indent at the very start of a file');
-  eq(Blocks.indentOf('<div><p>x</p>', 5), '',
-     'nothing when the block shares its line with something else');
-  eq(Blocks.indentOf('a\n\t\t<p>x', 4), '\t\t', 'tabs count as indent too');
-
-  eq(Blocks.markup({ tag: 'p', className: '' }, 'hello'), '<p>hello</p>',
-     'a plain block');
-  eq(Blocks.markup({ tag: 'li', className: 'item' }, 'hello'),
-     '<li class="item">hello</li>', 'a block that carries a class');
-  eq(Blocks.markup({ tag: 'p', className: 'a "b"' }, ''),
-     '<p class="a &quot;b&quot;"></p>',
-     'a quote in a class name is encoded, so it cannot break out of the attribute');
-}
-
-section('comments — reading');
-{
-  eq(Comments.textOf(' comment: needs a figure '), 'needs a figure', 'a Quick Edit comment');
-  eq(Comments.textOf('comment:no space'), 'no space', 'without the space');
-  eq(Comments.textOf(' COMMENT: shouty '), 'shouty', 'case does not matter');
-  eq(Comments.textOf(' Generated by a build tool '), null,
-     'somebody else\'s comment is not ours and is left alone');
-  eq(Comments.textOf('[if lt IE 9]> ... <![endif]'), null, 'nor is a conditional comment');
-  eq(Comments.textOf(' comment: one\n     two '), 'one\ntwo',
-     'continuation lines are un-indented on the way back in');
-}
-
-section('comments — writing');
-{
-  eq(Comments.markup('a note', '', '\n'), '<!-- comment: a note -->', 'the simplest case');
-  eq(Comments.markup('one\ntwo', '  ', '\n'), '<!-- comment: one\n       two -->',
-     'continuation lines are indented to sit under the first');
-
-  // A comment ends at the first "-->", so a note may not contain one.
-  ok(Comments.markup('watch --> this', '', '\n').indexOf('-->') ===
-     Comments.markup('watch --> this', '', '\n').length - 3,
-     'the only "-->" in the result is the one that closes it');
-  eq(Comments.sanitise('a -- b'), 'a - - b', 'a double hyphen is broken up');
-  eq(Comments.sanitise('trailing-'), 'trailing- ', 'a trailing hyphen cannot touch the bracket');
-  eq(Comments.sanitise('5 < 6 & 7 > 2'), '5 < 6 & 7 > 2',
-     'angle brackets and ampersands need no escaping inside a comment');
-
-  // Round trip: whatever we write, we must read back.
-  for (const note of ['plain', 'a -- b', 'ends with-', 'one\ntwo\nthree', '<p>markup</p>']) {
-    const written = Comments.markup(note, '  ', '\n');
-    const read = Comments.textOf(written.slice(4, -3));
-    ok(read !== null, 'round trip recognises: ' + JSON.stringify(note));
-  }
-}
-
-section('comments — deleting');
-{
-  const alone = '<div>\n  <!-- comment: x -->\n  <p>hi</p>\n</div>';
-  const token = { start: alone.indexOf('<!--'), end: alone.indexOf('-->') + 3 };
-  const cut = Comments.deleteRange(alone, token);
-  eq(alone.slice(0, cut.start) + alone.slice(cut.end), '<div>\n  <p>hi</p>\n</div>',
-     'a comment on its own line takes the whole line with it');
-
-  const inline = '<p>hi</p> <!-- comment: x --> <p>bye</p>';
-  const token2 = { start: inline.indexOf('<!--'), end: inline.indexOf('-->') + 3 };
-  const cut2 = Comments.deleteRange(inline, token2);
-  eq(inline.slice(0, cut2.start) + inline.slice(cut2.end), '<p>hi</p>  <p>bye</p>',
-     'a comment sharing its line leaves the line alone');
-}
-
-section('performance — wall clock, on the ~1MB fixture');
+section('performance — wall clock, on a ~1MB document');
 {
   const big = path.join(__dirname, 'fixtures', 'large.html');
   if (!fs.existsSync(big)) {
@@ -281,7 +210,7 @@ section('performance — wall clock, on the ~1MB fixture');
     const spans = tokenize(src);
     const tokenizeMs = Number(process.hrtime.bigint() - t) / 1e6;
 
-    // Worst case for saving: every single region rewritten at once.
+    // Worst case: every single region rewritten at once.
     const edits = spans.map((s) => ({ start: s.start, end: s.end, replacement: s.raw + '.' }));
     t = process.hrtime.bigint();
     const edited = applyEdits(src, edits);

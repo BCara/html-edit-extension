@@ -20,11 +20,17 @@
  * the user asked for — it is never stored, and never sent anywhere else.
  */
 
+// The classifier decides which documents Quick Edit will touch; the popup gets
+// its verdict relayed rather than re-deriving it.
+importScripts('/src/lib/origins.js');
+const Origins = self.QuickEditOrigins;
+
 // Order matters: each library defines globals the next file uses.
 const INJECT_FILES = [
-  'src/lib/tokenizer.js',
+  'src/lib/origins.js',
+  'packages/html-splice/src/tokenizer.js',
   'src/lib/mapping.js',
-  'src/lib/splice.js',
+  'packages/html-splice/src/splice.js',
   'src/lib/islands.js',
   'src/lib/blocks.js',
   'src/lib/comments.js',
@@ -33,8 +39,8 @@ const INJECT_FILES = [
   'src/content.js',
 ];
 
-function isLocalHtml(url) {
-  return /^file:\/\/.*\.x?html?(\?|#|$)/i.test(url || '');
+function classify(url) {
+  return Origins.classify(url || '');
 }
 
 async function ensureInjected(tabId) {
@@ -49,22 +55,36 @@ async function ensureInjected(tabId) {
   await chrome.scripting.executeScript({ target: { tabId }, files: INJECT_FILES });
 }
 
+/*
+ * The active tab, if Quick Edit is willing to edit it.
+ *
+ * Note which check applies to which kind. "Allow access to file URLs" is a
+ * file:// concern only: an http(s) document is read by the content script with
+ * a same-origin fetch, which needs no permission of any kind. That asymmetry is
+ * the whole reason LAN support was cheap to add — see readSource() in
+ * content.js.
+ */
 async function activeLocalTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) throw new Error('No active tab.');
-  if (!isLocalHtml(tab.url)) return { tab, code: 'not-local-html' };
-  if (!(await chrome.extension.isAllowedFileSchemeAccess())) {
+
+  const verdict = classify(tab.url);
+  if (!verdict.kind) return { tab, code: 'not-editable', reason: verdict.reason };
+
+  if (verdict.kind === 'file' && !(await chrome.extension.isAllowedFileSchemeAccess())) {
     return { tab, code: 'no-file-access' };
   }
-  return { tab };
+  return { tab, kind: verdict.kind };
 }
 
 // Relay a request from the popup to the content script, injecting it first.
 async function relay(type, extra) {
-  const { tab, code } = await activeLocalTab();
-  if (code) return { ok: false, code, url: tab.url };
+  const { tab, code, reason, kind } = await activeLocalTab();
+  if (code) return { ok: false, code, reason, url: tab.url };
   await ensureInjected(tab.id);
-  return await chrome.tabs.sendMessage(tab.id, Object.assign({ type }, extra));
+  const res = await chrome.tabs.sendMessage(tab.id, Object.assign({ type }, extra));
+  if (res && typeof res === 'object') res.kind = kind;
+  return res;
 }
 
 /*
@@ -80,6 +100,7 @@ async function relay(type, extra) {
  * falls back to asking the user to choose the file.
  */
 async function readFile(url) {
+  if (classify(url).kind !== 'file') return { ok: false, code: 'not-a-file-url' };
   const granted = await chrome.permissions.contains({ origins: ['file:///*'] });
   if (!granted) return { ok: false, code: 'no-host-permission' };
   try {
@@ -143,6 +164,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'quickEdit:readFile') {
     readFile(msg.url).then(sendResponse);
+    return true;
+  }
+
+  // The popup asks before it does anything, so that a served document never
+  // gets shown the file:// permission dance it has no use for.
+  if (msg.type === 'quickEdit:classifyActive') {
+    (async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const verdict = classify(tab && tab.url);
+      sendResponse({ ok: true, kind: verdict.kind, reason: verdict.reason });
+    })();
     return true;
   }
 

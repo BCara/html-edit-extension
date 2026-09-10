@@ -13,8 +13,17 @@ echo "== node: tokenizer + splice =="
 node "$DIR/test/node-test.js" || NODE_FAIL=1
 
 echo
-echo "== generating the ~1MB fixture =="
+echo "== node: the engine as a standalone package =="
+node "$DIR/packages/html-splice/test/engine-test.js" || NODE_FAIL=1
+
+echo
+echo "== node: save-in-place route =="
+node "$DIR/server/test-save.js" || NODE_FAIL=1
+
+echo
+echo "== generating the ~1MB fixtures =="
 node "$DIR/test/make-large.js"
+node "$DIR/packages/html-splice/test/make-large.js"
 
 if [ -z "$CHROME" ]; then
   echo

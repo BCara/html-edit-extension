@@ -1,14 +1,14 @@
 {
-  // Quick Edit — edit the visible text of a local HTML file, save it with the
-  // markup untouched.
+  // Quick Edit — edit the visible text of an HTML document, local or served
+  // from your own network, and save it with the markup untouched.
   //
   // Chrome's manifest parser accepts // comments; they are stripped before the
   // JSON is read. Every permission below is here because a specific feature
   // cannot work without it — see the justification on each one.
   "manifest_version": 3,
   "name": "Quick Edit",
-  "version": "0.3.0",
-  "description": "Edit the visible text of a local HTML file in place and save it without disturbing the markup.",
+  "version": "0.4.0",
+  "description": "Edit the visible text of an HTML document — local, or served from your own network — and save it without disturbing the markup.",
 
   "permissions": [
     // activeTab — granted only for the tab whose toolbar icon the user clicked,
@@ -16,6 +16,13 @@
     // read the current file:// document. Chosen instead of a host permission
     // (e.g. "file:///*") so the extension has no standing access to anything:
     // no click, no access.
+    //
+    // It is also the ONLY permission needed for an http(s) document served from
+    // your own network. A content script's fetch carries the page's origin, so
+    // re-reading the document it is running on — and PUTting it back, where the
+    // server allows that — is an ordinary same-origin request. No host
+    // permission is requested for http or https, and none is needed. Which
+    // addresses count as "your own network" is decided in src/lib/origins.js.
     "activeTab",
 
     // scripting — the content script is injected on demand by chrome.scripting

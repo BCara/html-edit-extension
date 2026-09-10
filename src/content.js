@@ -64,8 +64,9 @@
     source: null,     // original file text, verbatim
     map: null,        // { records, stats }
     ready: false,
-    readVia: null,    // which of the three routes below actually worked
+    readVia: null,    // which of the routes below actually worked
     readError: null,  // why the earlier ones did not
+    served: null,     // for an http(s) document: how to write it back
   };
 
   function send(message) {
@@ -105,7 +106,72 @@
    *
    * Decoded as UTF-8 in every case.
    */
+  function isServed() {
+    return location.protocol === 'http:' || location.protocol === 'https:';
+  }
+
+  /*
+   * Read a document served over http(s).
+   *
+   * This is the easy case, and it is worth being clear about why, because the
+   * file:// path below goes to considerable trouble for the same result. A
+   * content script's fetch carries the PAGE's origin. For a file:// page that
+   * origin may not read file:// URLs, hence the service worker. For an http
+   * page the origin is the server the page came from, and fetching your own URL
+   * is the most ordinary same-origin request there is. No permission, no
+   * service worker, no user gesture.
+   *
+   * The cache mode is deliberately left at its default rather than forced to
+   * 'no-store'. The browser already has the response it parsed into this page;
+   * a default fetch will reuse or revalidate exactly that, which is what we
+   * want. Forcing a fresh network read would risk picking up a NEWER version of
+   * the document than the one on screen, and quietly mapping offsets onto text
+   * the user cannot see. If it happens anyway — someone saved the file between
+   * load and edit — coverageProblem() catches it.
+   *
+   * The validators are kept so the write-back can be conditional: see PUT in
+   * editor.js. Without them a save could silently clobber someone else's edit.
+   */
+  function readServed(url) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      state.served = {
+        url: url.split('#')[0],
+        etag: r.headers.get('ETag'),
+        lastModified: r.headers.get('Last-Modified'),
+        canPut: false,        // decided by probeWriteBack(), below
+      };
+      state.readVia = 'server';
+      return r.text();
+    }).catch(function (err) {
+      state.readError = { ok: false, code: 'served-fetch-failed', message: String(err && err.message || err) };
+      console.log('[Quick Edit] could not re-fetch this document:', err && err.message);
+      return chooseSource();
+    });
+  }
+
+  /*
+   * Does this server accept a write-back?
+   *
+   * Asked once, with OPTIONS, so the status bar can offer "Save to server"
+   * honestly instead of discovering at save time that it cannot. A server that
+   * does not answer, or does not list PUT, simply gets the download path — no
+   * error, nothing to configure.
+   */
+  function probeWriteBack() {
+    if (!state.served) return Promise.resolve();
+    return fetch(state.served.url, { method: 'OPTIONS', credentials: 'same-origin' })
+      .then(function (r) {
+        var allow = (r.headers.get('Allow') || '') + ',' +
+                    (r.headers.get('Access-Control-Allow-Methods') || '');
+        state.served.canPut = /\bPUT\b/i.test(allow);
+      })
+      .catch(function () { /* no answer is a "no" */ });
+  }
+
   function readSource(url) {
+    if (isServed()) return readServed(url);
+
     return send({ type: 'quickEdit:readFile', url: url }).then(function (res) {
       if (res && res.ok) {
         state.readVia = 'service worker';
@@ -203,6 +269,8 @@
     return domReady().then(function () {
       return readSource(location.href);
     }).then(function (source) {
+      return probeWriteBack().then(function () { return source; });
+    }).then(function (source) {
       var problem = encodingProblem(source);
       if (problem) throw new Error(problem);
 
@@ -212,7 +280,9 @@
 
       state.source = source;
       state.map = map;
-      Editor.init({ source: source, map: map, filename: filename() });
+      Editor.init({
+        source: source, map: map, filename: filename(), served: state.served,
+      });
       state.ready = true;
       console.log('[Quick Edit] read via ' + state.readVia + ' —',
                   map.stats.editable, 'editable regions', map.stats);
@@ -233,6 +303,7 @@
       stats: state.map.stats,
       reasons: reasons,
       readVia: state.readVia,
+      writeBack: state.served ? (state.served.canPut ? 'server' : 'download') : 'download',
       editor: Editor.status(),
     };
     if (extra) for (var k in extra) out[k] = extra[k];

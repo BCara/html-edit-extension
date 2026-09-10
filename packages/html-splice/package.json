@@ -1,0 +1,41 @@
+{
+  "name": "html-text-splice",
+  "version": "0.1.0",
+  "description": "Edit the text of an HTML document without re-serialising it. Every byte you did not change survives exactly as written.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "COMMERCIAL.md"
+  ],
+  "scripts": {
+    "test": "node test/engine-test.js"
+  },
+  "keywords": [
+    "html",
+    "edit",
+    "splice",
+    "byte-preserving",
+    "tokenizer",
+    "offsets",
+    "cms",
+    "html-email",
+    "round-trip",
+    "no-reserialise"
+  ],
+  "license": "AGPL-3.0-only",
+  "author": "Cara Bertram",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BCara/html-edit-extension.git",
+    "directory": "packages/html-splice"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "sideEffects": false
+}
