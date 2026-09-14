@@ -14,6 +14,16 @@ OUT="$DIR/quick-edit-$(node -e "
   process.stdout.write(JSON.parse(raw).version);
 ").zip"
 
+# The skew detector compares src/content.js's VERSION against what a previous
+# injection left behind, so it is useless if it does not track the manifest.
+# These drifted apart once already; refuse to build a zip that repeats it.
+MANIFEST_V="$(basename "$OUT" .zip | sed 's/^quick-edit-//')"
+CONTENT_V="$(sed -n "s/.*var VERSION = '\([^']*\)'.*/\1/p" "$DIR/src/content.js")"
+if [ "$MANIFEST_V" != "$CONTENT_V" ]; then
+  echo "version mismatch: manifest.json is $MANIFEST_V, src/content.js is $CONTENT_V" >&2
+  exit 1
+fi
+
 rm -f "$OUT"
 cd "$DIR"
 
