@@ -97,7 +97,13 @@ http.createServer((req,res)=>{
 }).listen('"$PORT"');
 ' "$DIR" &
 SERVER_PID=$!
-sleep 1
+
+# Wait for it to actually answer rather than guessing at a second. A fixed
+# sleep made this suite fail intermittently, which is worse than not having it.
+for _ in $(seq 1 50); do
+  if curl -sf -o /dev/null "http://127.0.0.1:$PORT/app/index.html"; then break; fi
+  sleep 0.2
+done
 
 # Chrome does not exit on its own against a live server, so it is given a
 # deadline; the DOM it dumped before the deadline is what we read.
