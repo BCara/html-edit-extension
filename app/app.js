@@ -265,6 +265,36 @@ function watchUnsaved() {
   });
 }
 
+/*
+ * ?src=<url> opens a document straight into the editor.
+ *
+ * Convenient for a bookmark, and the seed of something larger: a link that
+ * opens somebody else's document ready to be marked up is the whole shape of
+ * sending a document out for review. The URL has to be same-origin or
+ * CORS-permitted, and the file is fetched, not uploaded — nothing leaves the
+ * browser either way.
+ *
+ * There is no file handle behind a fetched document, so Save will share or
+ * download rather than write in place. That is stated when it opens rather
+ * than discovered at save time.
+ */
+function openFromQuery() {
+  var src = new URLSearchParams(location.search).get('src');
+  if (!src) return;
+  fetch(src, { credentials: 'same-origin' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.text();
+    })
+    .then(function (text) {
+      var name = decodeURIComponent(src.split('/').pop().split('?')[0]) || 'document.html';
+      return load(text, name, null);
+    })
+    .catch(function (err) {
+      toast('Could not open ' + src + ' — ' + err.message, 'warn');
+    });
+}
+
 els.open.addEventListener('click', openFile);
 els.openMain.addEventListener('click', openFile);
 els.save.addEventListener('click', function () { window.QuickEditEditor.save(); });
@@ -281,6 +311,7 @@ els.save.addEventListener('click', function () { window.QuickEditEditor.save(); 
 });
 
 describeSaving();
+openFromQuery();
 
 // Exposed for the test suite: driving a real file picker from a headless
 // browser is not possible, so the suite calls load() directly with the bytes a

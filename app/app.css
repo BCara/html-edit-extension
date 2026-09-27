@@ -32,6 +32,17 @@
 
 * { box-sizing: border-box; }
 
+/*
+ * The hidden attribute has to win.
+ *
+ * [hidden] { display: none } is a UA rule, so any class here that sets display
+ * — .welcome is flex, .chrome is flex — silently beats it and the element stays
+ * on screen. That is what happened: the welcome panel never went away when a
+ * file opened, so it and the document shared the flex row and pushed the page
+ * off the side of a phone.
+ */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
@@ -48,6 +59,7 @@ body {
 /* ---- top bar --------------------------------------------------------- */
 .chrome {
   flex: none;
+  min-width: 0;
   height: var(--chrome-h);
   display: flex;
   align-items: center;
@@ -101,11 +113,18 @@ body {
 #stage {
   flex: 1 1 auto;
   min-height: 0;
+  /* A flex item will not shrink below its content by default, and a document
+     is as wide as it likes. Without this the stage refuses to be narrower than
+     the widest thing in the file and pushes the whole app off the side of the
+     screen — taking Save with it. */
+  min-width: 0;
   position: relative;
   display: flex;
+  overflow: hidden;
 }
 #frame {
   flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   border: 0;
   background: #fff;   /* the document brings its own; never show ours through */
@@ -166,6 +185,14 @@ body {
 }
 @media (min-width: 700px) {
   .how { grid-template-columns: repeat(3, 1fr); gap: 22px; }
+}
+
+/* Phone: the filename and the two controls earn their space; the wordmark does
+   not, once you are looking at your own document. */
+@media (max-width: 460px) {
+  body.editing .brand { display: none; }
+  .chrome { gap: 8px; }
+  .btn { padding: 0 12px; }
 }
 
 /* ---- toast ------------------------------------------------------------ */
