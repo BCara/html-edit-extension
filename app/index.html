@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quick Edit</title>
+<meta name="description" content="Fix the words in an HTML document without disturbing the markup.">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="chrome">
+  <div class="brand">Quick&nbsp;Edit</div>
+  <div class="file" id="filename" hidden></div>
+  <div class="spacer"></div>
+  <button id="open" class="btn">Open</button>
+  <button id="save" class="btn primary" hidden disabled>Save</button>
+</header>
+
+<main id="stage">
+  <section class="welcome" id="welcome">
+    <h1>Fix the words. Keep the file.</h1>
+    <p class="lede">
+      Open an HTML document, click any text and type. What you save is the file
+      you opened, with only the words you changed replaced — the markup,
+      indentation, comments and entities all exactly as they were.
+    </p>
+
+    <button id="open-main" class="btn big primary">Open an HTML file</button>
+    <p class="drop-hint" id="drop-hint">or drop one anywhere on this page</p>
+
+    <dl class="how">
+      <div>
+        <dt>Nothing is uploaded</dt>
+        <dd>Your document is opened and edited in this browser tab. It is never
+            sent anywhere.</dd>
+      </div>
+      <div>
+        <dt id="save-story-title">Saving</dt>
+        <dd id="save-story">Checking what this browser allows…</dd>
+      </div>
+      <div>
+        <dt>What you can change</dt>
+        <dd>Words, and adding another paragraph, list or table like one already
+            there. Not layout, styling or images — that restraint is what keeps
+            the file intact.</dd>
+      </div>
+    </dl>
+  </section>
+
+  <iframe id="frame" hidden title="The document you are editing"
+          sandbox="allow-same-origin"></iframe>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- The engine and the editor, exactly as the extension loads them. -->
+<script src="../packages/html-splice/src/tokenizer.js"></script>
+<script src="../packages/html-splice/src/splice.js"></script>
+<script src="../src/lib/origins.js"></script>
+<script src="../src/lib/mapping.js"></script>
+<script src="../src/lib/islands.js"></script>
+<script src="../src/lib/blocks.js"></script>
+<script src="../src/lib/structures.js"></script>
+<script src="../src/lib/comments.js"></script>
+<script src="../src/lib/prompt.js"></script>
+<script src="../src/editor.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

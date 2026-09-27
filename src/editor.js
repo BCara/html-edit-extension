@@ -82,8 +82,28 @@
   // deliberately absent — it is handled separately, as a line break.
   var CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
+  /*
+   * The document being edited.
+   *
+   * In the extension that is the page the content script was injected into, so
+   * it is the global `document` and always has been. In the web app it is an
+   * iframe holding the user's file, and the editor is running in the app's
+   * document instead — a different window entirely. Everything below goes
+   * through these two rather than the globals, because the editor does not
+   * necessarily run inside the document it edits.
+   *
+   * The libraries never needed this: mapping.build() already takes a document,
+   * and islands.js, blocks.js and structures.js work off ownerDocument.
+   */
+  function doc() { return state.doc || document; }
+  function win() {
+    return state.win || (state.doc && state.doc.defaultView) || window;
+  }
+
   var state = {
     active: false,
+    doc: null,            // the document being edited; null means this one
+    win: null,
     source: '',
     map: null,
     filename: 'page.html',
@@ -367,10 +387,10 @@
     }
 
     var template = Blocks.templateFor(block);
-    var element = document.createElement(template.tag);
+    var element = doc().createElement(template.tag);
     if (template.className) element.setAttribute('class', template.className);
 
-    var island = document.createElement('span');
+    var island = doc().createElement('span');
     island.setAttribute(Islands.ATTR, '');
     island.setAttribute('contenteditable', 'true');
     element.appendChild(island);
@@ -412,14 +432,14 @@
    * Never nothing — the toolbar should not fail for want of a destination.
    */
   function currentBlock() {
-    var focused = islandOf(document.activeElement);
+    var focused = islandOf(doc().activeElement);
     if (focused) {
       var block = Blocks.blockFor(focused);
       if (block && canAddAfter(block)) return block;
     }
     if (state.hoverBlock && canAddAfter(state.hoverBlock)) return state.hoverBlock;
 
-    var islands = document.querySelectorAll('[' + Islands.ATTR + ']');
+    var islands = doc().querySelectorAll('[' + Islands.ATTR + ']');
     for (var i = islands.length - 1; i >= 0; i--) {
       var b = Blocks.blockFor(islands[i]);
       if (b && canAddAfter(b)) return b;
@@ -775,7 +795,7 @@
 
     // Ctrl/Cmd+Enter adds a block from anywhere in it, not just the end.
     if (key === 'enter') {
-      var island = islandOf(document.activeElement);
+      var island = islandOf(doc().activeElement);
       if (island) { e.preventDefault(); addAfterIsland(island); }
       return;
     }
@@ -840,7 +860,7 @@
   function ensureAddButton() {
     if (state.add && state.add.host.isConnected) return state.add;
 
-    var host = document.createElement('div');
+    var host = doc().createElement('div');
     host.setAttribute(UI_ATTR, '');
     [['position', 'absolute'], ['z-index', '2147483646'], ['margin', '0'],
      ['padding', '0'], ['width', 'auto'], ['height', 'auto'],
@@ -874,7 +894,7 @@
     host.addEventListener('mouseenter', clearAddHide);
     host.addEventListener('mouseleave', requestHideAdd);
 
-    document.documentElement.appendChild(host);
+    doc().documentElement.appendChild(host);
     state.add = { host: host, row: shadow.querySelector('.row') };
     return state.add;
   }
@@ -948,8 +968,8 @@
     clearAddHide();
     state.hoverBlock = block;
 
-    var left = rect.left + window.scrollX;
-    var top = rect.top + window.scrollY;
+    var left = rect.left + win().scrollX;
+    var top = rect.top + win().scrollY;
     if (left >= ADD_BTN + ADD_GAP + 4) {
       ui.row.className = 'row stack';
       left -= ADD_BTN + ADD_GAP;
@@ -1008,15 +1028,15 @@
 
   function addListeners() {
     if (state.listening) return;
-    LISTENERS.forEach(function (l) { document.addEventListener(l[0], l[1], l[2]); });
-    window.addEventListener('resize', onResize);
+    LISTENERS.forEach(function (l) { doc().addEventListener(l[0], l[1], l[2]); });
+    win().addEventListener('resize', onResize);
     state.listening = true;
   }
 
   function removeListeners() {
     if (!state.listening) return;
-    LISTENERS.forEach(function (l) { document.removeEventListener(l[0], l[1], l[2]); });
-    window.removeEventListener('resize', onResize);
+    LISTENERS.forEach(function (l) { doc().removeEventListener(l[0], l[1], l[2]); });
+    win().removeEventListener('resize', onResize);
     state.listening = false;
   }
 
@@ -1200,7 +1220,7 @@
   function ensureRail() {
     if (state.rail && state.rail.host.isConnected) return state.rail;
 
-    var html = document.documentElement;
+    var html = doc().documentElement;
     state.railStyle = {
       paddingRight: html.style.getPropertyValue('padding-right'),
       paddingPriority: html.style.getPropertyPriority('padding-right'),
@@ -1211,7 +1231,7 @@
     // So the rail positions against the padding box rather than the viewport.
     html.style.setProperty('position', 'relative', 'important');
 
-    var host = document.createElement('div');
+    var host = doc().createElement('div');
     host.setAttribute(UI_ATTR, '');
     [['position', 'absolute'], ['top', '0'], ['right', '10px'],
      ['width', '260px'], ['height', '0'], ['margin', '0'], ['padding', '0'],
@@ -1233,7 +1253,7 @@
     state.rail = null;
 
     if (state.railStyle) {
-      var html = document.documentElement;
+      var html = doc().documentElement;
       var saved = state.railStyle;
       html.style.removeProperty('padding-right');
       html.style.removeProperty('position');
@@ -1248,7 +1268,7 @@
   }
 
   function clearHighlights() {
-    var marked = document.querySelectorAll('[' + COMMENTED_ATTR + ']');
+    var marked = doc().querySelectorAll('[' + COMMENTED_ATTR + ']');
     for (var i = 0; i < marked.length; i++) {
       marked[i].removeAttribute(COMMENTED_ATTR);
       marked[i].removeAttribute(ACTIVE_ATTR);
@@ -1277,7 +1297,7 @@
     clearHighlights();
 
     regions.forEach(function (region) {
-      var card = document.createElement('div');
+      var card = doc().createElement('div');
       card.className = 'card' + (region.text.trim() === region.saved ? '' : ' unsaved');
       card.innerHTML =
         '<div class="head"><span class="who">Comment</span>' +
@@ -1340,7 +1360,7 @@
       var wanted = bottom;
       if (region.block && region.block.getBoundingClientRect) {
         var rect = region.block.getBoundingClientRect();
-        wanted = rect.top + window.scrollY;
+        wanted = rect.top + win().scrollY;
       }
       var top = Math.max(wanted, bottom);
       region.card.style.top = top + 'px';
@@ -1356,10 +1376,10 @@
 
   function ensureStyles() {
     if (state.styleEl && state.styleEl.isConnected) return;
-    var el = document.createElement('style');
+    var el = doc().createElement('style');
     el.setAttribute(UI_ATTR, '');
     el.textContent = ISLAND_CSS;
-    (document.head || document.documentElement).appendChild(el);
+    (doc().head || doc().documentElement).appendChild(el);
     state.styleEl = el;
   }
 
@@ -1372,7 +1392,7 @@
   function ensureStatusBar() {
     if (state.ui && state.ui.host.isConnected) return;
 
-    var host = document.createElement('div');
+    var host = doc().createElement('div');
     host.setAttribute(UI_ATTR, '');
     [['position', 'fixed'], ['right', '16px'], ['bottom', '16px'],
      ['z-index', '2147483647'], ['margin', '0'], ['padding', '0'],
@@ -1406,7 +1426,7 @@
         '<button class="done">Done</button>' +
       '</div>';
 
-    document.documentElement.appendChild(host);
+    doc().documentElement.appendChild(host);
 
     var ui = {
       host: host,
@@ -1525,7 +1545,7 @@
    */
   function collectEdits() {
     var edits = [];
-    var islands = document.querySelectorAll('[' + Islands.ATTR + ']');
+    var islands = doc().querySelectorAll('[' + Islands.ATTR + ']');
 
     for (var i = 0; i < islands.length; i++) {
       var region = state.byIsland.get(islands[i]);
@@ -1683,12 +1703,12 @@
         if (res && res.ok) { console.log('[Quick Edit] saved via data URL'); return res; }
         console.warn('[Quick Edit] downloads API unavailable, falling back to a download link:',
                      res && res.message);
-        var a = document.createElement('a');
+        var a = doc().createElement('a');
         a.setAttribute(UI_ATTR, '');
         a.href = URL.createObjectURL(new Blob([text], { type: 'text/html;charset=utf-8' }));
         a.download = state.filename;
         a.style.setProperty('display', 'none', 'important');
-        document.documentElement.appendChild(a);
+        doc().documentElement.appendChild(a);
         a.click();
         setTimeout(function () {
           URL.revokeObjectURL(a.href);
@@ -1786,9 +1806,9 @@
     var skipped = emptyAddedCount() + emptyCommentCount();
 
     var toServer = !!(state.served && state.served.canPut);
-    flash(toServer ? 'Saving to the server…' : 'Saving…');
+    flash(state.saveFile ? 'Saving…' : (toServer ? 'Saving to the server…' : 'Saving…'));
 
-    var attempt = toServer
+    var attempt = state.saveFile ? Promise.resolve(state.saveFile(text)) : toServer
       ? saveToServer(text).then(function (res) {
           if (res.ok || res.conflict) return res;
           // The server said no. Do not lose the edits over it — fall back to
@@ -1817,7 +1837,9 @@
       refresh();
 
       var where;
-      if (res.toServer) {
+      if (res.where) {
+        where = res.where;
+      } else if (res.toServer) {
         where = 'Saved ' + state.filename + ' to the server';
       } else if (res.noRoute) {
         where = 'This server does not accept saves — downloaded ' + state.filename + ' instead';
@@ -1848,7 +1870,7 @@
       } else {
         state.regions.forEach(function (r) { r.island.setAttribute('contenteditable', 'true'); });
       }
-      document.documentElement.setAttribute(MODE_ATTR, 'on');
+      doc().documentElement.setAttribute(MODE_ATTR, 'on');
       addListeners();
       ensureStatusBar();
       renderRail();
@@ -1856,7 +1878,7 @@
       if (!state.regions.length) flash('No editable text found in this file');
     } else {
       state.active = false;
-      document.documentElement.removeAttribute(MODE_ATTR);
+      doc().documentElement.removeAttribute(MODE_ATTR);
       removeListeners();
       teardownRegions();
       clearHighlights();
@@ -1871,6 +1893,13 @@
   }
 
   function init(options) {
+    state.doc = options.doc || null;
+    // A host that owns saving supplies this: text -> Promise<{ok, where}>. The
+    // web app writes through a file handle, shares, or downloads, and knows
+    // which of those it did; the extension supplies nothing and keeps the
+    // server/download path below.
+    state.saveFile = options.saveFile || null;
+    state.win = state.doc ? state.doc.defaultView : null;
     state.source = options.source;
     state.map = options.map;
     state.filename = options.filename || 'page.html';
@@ -1880,7 +1909,7 @@
     // Registered once and left in place: unsaved edits still exist after edit
     // mode is switched off, and losing them to a stray navigation would be the
     // worst thing this extension could do.
-    window.addEventListener('beforeunload', onBeforeUnload);
+    win().addEventListener('beforeunload', onBeforeUnload);
   }
 
   function status() {

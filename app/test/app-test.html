@@ -1,0 +1,118 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Quick Edit — web app tests</title>
+<!--
+  Loads the real app in a frame and drives it, because the thing worth testing
+  is the app as shipped: its own index.html, its own script tags, the iframe it
+  renders into. The file picker cannot be driven from a headless browser, so
+  load() is called directly with the bytes a picker would have returned.
+-->
+<style>
+  body { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 1.5rem; }
+  #app { width: 900px; height: 500px; border: 1px solid #ccc; }
+  .pass { color: #15803d; }
+  .fail { color: #b91c1c; font-weight: 700; }
+  .head { color: #4f46e5; font-weight: 700; display: block; margin-top: .9rem; }
+  #out { white-space: pre-wrap; }
+  #summary { margin-top: 1rem; padding-top: .7rem; border-top: 1px solid #ddd; font-weight: 700; }
+</style>
+
+<h1 style="font:600 15px system-ui">Quick Edit — web app tests</h1>
+<div id="out">Running…</div>
+<div id="summary"></div>
+<iframe id="app" src="../index.html"></iframe>
+
+<script src="../../test/report.js"></script>
+<script>
+'use strict';
+Report.mount('out', 'summary');
+const { heading, ok, eq, line } = Report;
+
+const SAMPLE = [
+  '<!doctype html>',
+  '<html lang=en-AU>',
+  '<!-- build: do not hand-edit -->',
+  '<body>',
+  '    <p class=lead>Revenue grew by 12% over the quarter.</p>',
+  '    <table>',
+  '      <tr><td>Smith&nbsp;&amp;&nbsp;Sons</td><td>&#39;on track&#39;</td></tr>',
+  '    </table>',
+  '</body>',
+  '</html>',
+  '',
+].join('\n');
+
+function afterFrameLoad(frame) {
+  return new Promise((resolve) => {
+    if (frame.contentWindow && frame.contentWindow.__quickEditApp) return resolve();
+    frame.addEventListener('load', () => setTimeout(resolve, 60), { once: true });
+  });
+}
+
+async function run() {
+  const frame = document.getElementById('app');
+  await afterFrameLoad(frame);
+  const W = frame.contentWindow;
+  const app = W.__quickEditApp;
+
+  heading('the app loads');
+  ok(!!app, 'the app booted and exposed its test hook');
+  ok(!!W.QuickEditEditor, 'the editor is present');
+  ok(!!W.QuickEditStructures, 'so are the structures');
+
+  heading('opening a file');
+  await app.load(SAMPLE, 'sample.html', null);
+  const docFrame = W.document.getElementById('frame');
+  ok(!docFrame.hidden, 'the document frame is shown');
+  ok(W.document.getElementById('welcome').hidden, 'and the welcome screen is put away');
+  eq(W.document.getElementById('filename').textContent, 'sample.html', 'the filename is shown');
+
+  const inner = docFrame.contentDocument;
+  ok(!!inner.querySelector('p.lead'), 'the document really parsed inside the frame');
+  eq(inner.querySelectorAll('td').length, 2, 'including its table');
+
+  heading('the sandbox keeps the document inert');
+  eq(docFrame.getAttribute('sandbox'), 'allow-same-origin',
+     'scripts are not allowed in the frame, but this page can still reach into it');
+
+  heading('editing writes the file the user opened');
+  {
+    const islands = inner.querySelectorAll('[data-qe-island]');
+    ok(islands.length > 0, 'the document has editable regions');
+
+    // Type the way the editor's own suite does: beforeinput, mutate, input.
+    const island = [...islands].find((i) => W.QuickEditIslands.readValue(i).includes('Revenue grew'));
+    ok(!!island, 'found the paragraph to edit');
+    W.QuickEditIslands.writeValue(island, 'Revenue grew by 18% over the quarter.');
+    island.dispatchEvent(new W.Event('input', { bubbles: true }));
+
+    const out = W.QuickEditEditor.preview();
+    const a = SAMPLE.split('\n'), b = out.split('\n');
+    const differing = a.map((l, i) => l === b[i] ? null : i).filter((i) => i !== null);
+
+    eq(differing.length, 1, 'exactly one line of the file differs');
+    ok(out.includes('Revenue grew by 18%'), 'and it carries the new words');
+    ok(out.includes('<html lang=en-AU>'), 'the unquoted attribute survived');
+    ok(out.includes('<!-- build: do not hand-edit -->'), 'the comment survived');
+    ok(out.includes('&#39;on track&#39;'), 'the entities survived');
+    ok(out.includes('<tr><td>Smith'), 'no <tbody> was invented');
+    ok(!out.includes('data-qe-island'), 'no editing wrapper reached the file');
+  }
+
+  heading('saving');
+  {
+    // No file handle in this environment, and no share sheet, so it must fall
+    // all the way through to a download and say so.
+    const res = await app.saveFile('<p>x</p>');
+    ok(res && res.ok, 'saving reports success');
+    ok(/download/i.test(res.where || ''), 'and says it downloaded, which is the last resort');
+  }
+
+  Report.finish();
+}
+
+run().catch((err) => {
+  line('fail', '  FAIL  suite crashed — ' + (err && err.stack || err));
+  Report.finish();
+});
+</script>
