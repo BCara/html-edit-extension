@@ -310,7 +310,46 @@ els.save.addEventListener('click', function () { window.QuickEditEditor.save(); 
   });
 });
 
+/*
+ * Register the service worker, which is what makes the app installable and
+ * lets it work with no network.
+ *
+ * It needs a secure context: https, or localhost. Served over plain http on a
+ * LAN address it simply will not register, and the app still works — it just
+ * cannot be installed from there. Nothing here treats that as an error.
+ */
+function registerWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  if (!window.isSecureContext) {
+    console.info('[Quick Edit] not a secure context, so no offline support or ' +
+                 'install here. Serve over https and it appears.');
+    return;
+  }
+  navigator.serviceWorker.register('sw.js').catch(function (err) {
+    console.warn('[Quick Edit] the service worker did not register:', err);
+  });
+}
+
+/*
+ * A file opened from the operating system, once the app is installed and
+ * registered as an HTML handler — double-clicking a document, or Open With.
+ * The handle comes with it, so Save writes straight back to that file.
+ */
+function acceptLaunchedFile() {
+  if (!('launchQueue' in window)) return;
+  window.launchQueue.setConsumer(function (params) {
+    if (!params || !params.files || !params.files.length) return;
+    var handle = params.files[0];
+    handle.getFile()
+      .then(function (file) { return file.text().then(function (t) { return [t, file.name]; }); })
+      .then(function (pair) { return load(pair[0], pair[1], handle); })
+      .catch(function (err) { toast('Could not open that file: ' + err.message, 'warn'); });
+  });
+}
+
 describeSaving();
+registerWorker();
+acceptLaunchedFile();
 openFromQuery();
 
 // Exposed for the test suite: driving a real file picker from a headless

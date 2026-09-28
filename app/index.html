@@ -6,6 +6,17 @@
 <title>Quick Edit</title>
 <meta name="description" content="Fix the words in an HTML document without disturbing the markup.">
 <link rel="stylesheet" href="app.css">
+
+<!-- Installable: an icon on the home screen and its own window, rather than a
+     tab someone has to find again. iOS ignores the manifest's icons, hence the
+     apple-touch-icon; it also ignores theme_color, hence the meta. -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15181b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../icons/icon192.png">
+<link rel="apple-touch-icon" href="../icons/icon192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Quick Edit">
 </head>
 <body>
 
