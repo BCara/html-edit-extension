@@ -40,6 +40,36 @@
     <button id="open-main" class="btn big primary">Open an HTML file</button>
     <p class="drop-hint" id="drop-hint">or drop one anywhere on this page</p>
 
+    <section class="network">
+      <button id="net-toggle" class="btn" aria-expanded="false" aria-controls="net-form">
+        Open from a server on your network
+      </button>
+
+      <form id="net-form" hidden>
+        <label for="net-url">Address of a document on your network</label>
+        <input id="net-url" type="url" inputmode="url" autocomplete="url"
+               spellcheck="false" autocapitalize="off"
+               placeholder="http://192.168.1.10:8080/reports/plan.html">
+        <div class="net-row">
+          <button type="submit" class="btn primary">Open</button>
+          <span class="net-msg" id="net-msg"></span>
+        </div>
+        <p class="hint">
+          A NAS, a documents server, anything on your own network — a
+          <code>192.168.</code>, <code>10.</code> or <code>172.16–31.</code>
+          address, <code>localhost</code>, a <code>.local</code> name, or a
+          private mesh. Public websites are refused: the guarantee this tool
+          makes depends on re-reading the same bytes the browser parsed, which
+          does not hold for a page built fresh on every request.
+        </p>
+      </form>
+
+      <div id="recents-wrap" hidden>
+        <h2 class="recents-title">Opened before</h2>
+        <ul id="recents" class="recents"></ul>
+      </div>
+    </section>
+
     <dl class="how">
       <div>
         <dt>Nothing is uploaded</dt>

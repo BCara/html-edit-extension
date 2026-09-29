@@ -21,6 +21,9 @@ const path = require('path');
 const { isPrivateHost } = require('./src/lib/origins.js');
 
 const PORT = Number(process.argv[2] || 8700);
+// Loopback by default. QE_HOST=0.0.0.0 also answers on the LAN, which is how a
+// phone reaches it over plain http without waiting on a certificate.
+const HOST = process.env.QE_HOST || '127.0.0.1';
 const ROOT = path.resolve(process.argv[3] || path.join(__dirname, 'dist'));
 
 const TYPES = {
@@ -135,6 +138,6 @@ http.createServer((req, res) => {
     });
     fs.createReadStream(file).pipe(res);
   });
-}).listen(PORT, '127.0.0.1', () => {
-  console.log('Quick Edit serving ' + ROOT + ' on http://127.0.0.1:' + PORT);
+}).listen(PORT, HOST, () => {
+  console.log('Quick Edit serving ' + ROOT + ' on http://' + HOST + ':' + PORT);
 });

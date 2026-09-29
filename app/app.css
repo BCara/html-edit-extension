@@ -215,3 +215,136 @@ body {
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---- opening from your own network ------------------------------------ */
+.network {
+  width: 100%;
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+#net-form {
+  width: 100%;
+  max-width: 34rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#net-form label {
+  font-size: 13px;
+  font-weight: 600;
+}
+#net-url {
+  font: inherit;
+  font-size: 16px;            /* below 16px, iOS zooms the page on focus */
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 44px;
+}
+#net-url:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.net-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.net-msg {
+  font-size: 13px;
+  color: var(--muted);
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.net-msg.warn { color: var(--warn); }
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 52ch;
+}
+.hint code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .92em;
+  background: rgba(127, 127, 127, .14);
+  padding: .08em .3em;
+  border-radius: 3px;
+}
+
+.recents-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.recents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 34rem;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.recents li {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+.recent-open {
+  font: inherit;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 44px;
+  justify-content: center;
+}
+.recent-open:hover { background: rgba(127, 127, 127, .1); }
+.recent-name {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-host {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-forget {
+  font: inherit;
+  flex: none;
+  width: 44px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+.recent-forget:hover { background: rgba(127, 127, 127, .1); color: var(--ink); }

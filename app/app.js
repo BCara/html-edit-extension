@@ -56,6 +56,9 @@ var current = {
 
 var CAN_HANDLE = typeof window.showOpenFilePicker === 'function';
 
+var RECENTS_KEY = 'quick-edit:recent-network-documents';
+var RECENTS_MAX = 6;
+
 // --- chrome ------------------------------------------------------------------
 
 var toastTimer = 0;
@@ -262,6 +265,133 @@ function saveFile(text) {
   return Promise.resolve(downloadFile(text));
 }
 
+// --- documents on your own network -------------------------------------------
+
+/*
+ * Anything on the user's own network: a NAS, a documents server, a static site
+ * being previewed. Public origins are refused, and the refusal is worth stating
+ * plainly because it looks arbitrary otherwise — the byte-preservation
+ * guarantee rests on re-reading exactly the bytes the browser parsed, which
+ * holds for a file server and does not hold for a page rendered per request.
+ *
+ * The same rule the extension applies to itself, from the same module.
+ */
+function networkProblem(value) {
+  var u;
+  try {
+    u = new URL(value);
+  } catch (e) {
+    return 'That does not look like a web address. It should start with http://';
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+    return 'Only http:// and https:// addresses.';
+  }
+  if (!window.QuickEditOrigins.isPrivateHost(u.hostname)) {
+    return u.hostname + ' is not on your own network, so Quick Edit will not ' +
+           'open it. Addresses like 192.168.x.x, 10.x.x.x, localhost or a ' +
+           '.local name are what it expects.';
+  }
+  if (!/\.x?html?$/i.test(u.pathname)) {
+    return 'That path does not end in .html, .htm or .xhtml.';
+  }
+  return null;
+}
+
+function readRecents() {
+  try {
+    var raw = localStorage.getItem(RECENTS_KEY);
+    var list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];     // private window, cleared storage, storage refused entirely
+  }
+}
+
+function rememberRecent(url) {
+  try {
+    var list = readRecents().filter(function (u) { return u !== url; });
+    list.unshift(url);
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, RECENTS_MAX)));
+  } catch (e) { /* not worth failing an open over */ }
+  renderRecents();
+}
+
+function forgetRecent(url) {
+  try {
+    localStorage.setItem(RECENTS_KEY,
+      JSON.stringify(readRecents().filter(function (u) { return u !== url; })));
+  } catch (e) { /* as above */ }
+  renderRecents();
+}
+
+function renderRecents() {
+  var list = readRecents();
+  var wrap = document.getElementById('recents-wrap');
+  var ul = document.getElementById('recents');
+  wrap.hidden = list.length === 0;
+  ul.textContent = '';
+
+  list.forEach(function (url) {
+    var li = document.createElement('li');
+
+    var open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'recent-open';
+    var name = decodeURIComponent(url.split('/').pop().split('?')[0]) || url;
+    open.innerHTML = '';
+    var strong = document.createElement('span');
+    strong.className = 'recent-name';
+    strong.textContent = name;
+    var where = document.createElement('span');
+    where.className = 'recent-host';
+    try { where.textContent = new URL(url).host; } catch (e) { where.textContent = url; }
+    open.appendChild(strong);
+    open.appendChild(where);
+    open.addEventListener('click', function () { openNetwork(url); });
+
+    var drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'recent-forget';
+    drop.title = 'Forget this one';
+    drop.setAttribute('aria-label', 'Forget ' + name);
+    drop.textContent = '\u00d7';
+    drop.addEventListener('click', function () { forgetRecent(url); });
+
+    li.appendChild(open);
+    li.appendChild(drop);
+    ul.appendChild(li);
+  });
+}
+
+function netMessage(text, tone) {
+  var el = document.getElementById('net-msg');
+  el.textContent = text || '';
+  el.className = 'net-msg' + (tone ? ' ' + tone : '');
+}
+
+function openNetwork(url) {
+  var problem = networkProblem(url);
+  if (problem) { netMessage(problem, 'warn'); return; }
+
+  netMessage('Fetching…');
+  resolveSrc(url)
+    .then(function (resolved) { return fetch(resolved, { credentials: 'same-origin' }); })
+    .then(function (r) {
+      if (!r.ok) throw new Error('the server answered ' + r.status);
+      return r.text();
+    })
+    .then(function (text) {
+      var name = decodeURIComponent(url.split('/').pop().split('?')[0]) || 'document.html';
+      rememberRecent(url);
+      netMessage('');
+      // No file handle behind a fetched document, so Save shares or downloads.
+      return load(text, name, null);
+    })
+    .catch(function (err) {
+      netMessage('Could not open it — ' + err.message, 'warn');
+    });
+}
+
 // --- wiring ------------------------------------------------------------------
 
 function watchUnsaved() {
@@ -340,6 +470,35 @@ function openFromQuery() {
 
 els.open.addEventListener('click', openFile);
 els.openMain.addEventListener('click', openFile);
+
+(function wireNetworkPanel() {
+  var toggle = document.getElementById('net-toggle');
+  var form = document.getElementById('net-form');
+  var input = document.getElementById('net-url');
+
+  toggle.addEventListener('click', function () {
+    var opening = form.hidden;
+    form.hidden = !opening;
+    toggle.setAttribute('aria-expanded', String(opening));
+    if (opening) input.focus();
+  });
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var value = input.value.trim();
+    if (value) openNetwork(value);
+  });
+
+  // Say what is wrong while they are still typing, not after they commit.
+  input.addEventListener('input', function () {
+    var value = input.value.trim();
+    if (!value) { netMessage(''); return; }
+    var problem = networkProblem(value);
+    netMessage(problem || '', problem ? 'warn' : '');
+  });
+
+  renderRecents();
+})();
 els.save.addEventListener('click', function () { window.QuickEditEditor.save(); });
 
 // Drop a file anywhere. Only useful with a pointer, so it is not advertised on
