@@ -278,15 +278,45 @@ function watchUnsaved() {
  * download rather than write in place. That is stated when it opens rather
  * than discovered at save time.
  */
+/*
+ * A browser refuses fetch() from an https page to an http URL — mixed content,
+ * decided before CORS is even looked at. The app has to be on https to be
+ * installable, and documents on a home network are usually on plain http, so
+ * that combination is the normal case rather than an edge one.
+ *
+ * Where the host offers /fetch, the request goes through it and arrives on this
+ * origin instead. Where it does not — a static host with no backend — there is
+ * nothing to be done in the page, and saying so beats a blocked request and a
+ * console error nobody sees.
+ */
+function resolveSrc(src) {
+  var mixed = location.protocol === 'https:' && /^http:\/\//i.test(src);
+  if (!mixed) return Promise.resolve(src);
+
+  return fetch('fetch?url=' + encodeURIComponent(src), { method: 'HEAD' })
+    .then(function (r) {
+      if (r.ok) return 'fetch?url=' + encodeURIComponent(src);
+      throw new Error('proxy said ' + r.status);
+    })
+    .catch(function () {
+      throw new Error(
+        'This page is on https and that document is on http, which browsers ' +
+        'will not mix. Serve the document over https, or open the app over ' +
+        'http, or download the file and open it with the button above.');
+    });
+}
+
 function openFromQuery() {
   var src = new URLSearchParams(location.search).get('src');
   if (!src) return;
-  fetch(src, { credentials: 'same-origin' })
+  resolveSrc(src)
+    .then(function (url) { return fetch(url, { credentials: 'same-origin' }); })
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
     })
     .then(function (text) {
+      // From the document's own URL, never the proxy wrapper around it.
       var name = decodeURIComponent(src.split('/').pop().split('?')[0]) || 'document.html';
       return load(text, name, null);
     })
