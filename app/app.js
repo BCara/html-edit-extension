@@ -154,9 +154,22 @@ function render(source) {
     d.open();
     d.write(source);
     d.close();
-    // document.write is synchronous, but give layout a frame before measuring
-    // anything, since the editor positions controls against real geometry.
-    requestAnimationFrame(function () { resolve(d); });
+
+    // document.write is synchronous, so the DOM exists the moment it returns;
+    // the wait is only to let layout settle before the editor measures against
+    // real geometry.
+    //
+    // It cannot be a bare requestAnimationFrame. A hidden tab does not paint,
+    // so rAF never fires there, and opening a document in a background tab
+    // would hang for ever with no error. Whichever comes first wins.
+    var settled = false;
+    function ready() {
+      if (settled) return;
+      settled = true;
+      resolve(d);
+    }
+    requestAnimationFrame(ready);
+    setTimeout(ready, 50);
   });
 }
 
