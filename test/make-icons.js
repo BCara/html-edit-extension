@@ -100,8 +100,40 @@ function render(size) {
   };
 }
 
+/*
+ * The maskable variant, for Android's adaptive icons.
+ *
+ * The launcher crops the icon to whatever shape the device uses — circle,
+ * squircle, teardrop — so only the middle 80% is guaranteed to survive. The
+ * background therefore runs edge to edge with no rounded corners of its own,
+ * and the beam is drawn smaller so the crop cannot bite into it.
+ */
+function renderMaskable(size) {
+  // The safe zone is the middle 80%, so 0.28-0.72 sits comfortably inside it
+  // while still filling enough of the tile to read at launcher size.
+  const t = Math.max(1, Math.round(size * 0.08));
+  const top = size * 0.28, bot = size * 0.72;
+  const cx = size / 2;
+  const serif = size * 0.145;
+  const inBeam = (px, py) => {
+    if (py < top || py > bot) return false;
+    if (Math.abs(px - cx) <= t / 2) return true;
+    if (Math.abs(px - cx) <= serif && (py <= top + t || py >= bot - t)) return true;
+    return false;
+  };
+
+  return (x, y) => {
+    const fg = coverage(size, x, y, inBeam);
+    const mix = (i) => Math.round(BG[i] * (1 - fg) + FG[i] * fg);
+    return [mix(0), mix(1), mix(2), 255];
+  };
+}
+
 const dir = path.join(__dirname, '..', 'icons');
-for (const size of [16, 32, 48, 128]) {
+// 16-128 are the extension's toolbar; 192 and 512 are what a web app manifest
+// asks for, and 512-maskable is what an Android launcher crops.
+for (const size of [16, 32, 48, 128, 192, 512]) {
   fs.writeFileSync(path.join(dir, `icon${size}.png`), png(size, render(size)));
 }
+fs.writeFileSync(path.join(dir, 'icon512-maskable.png'), png(512, renderMaskable(512)));
 console.log('icons written to', dir);

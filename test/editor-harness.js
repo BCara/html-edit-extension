@@ -527,22 +527,23 @@ async function run() {
        'and lands between the two existing items, with the list\'s own indent');
   }
 
-  heading('adding — Enter at the end of a block');
+  heading('adding — Enter breaks the line, except in a list');
   {
     // #p4 is "Another <span>paragraph</span> with an inline span." — three runs
-    // of text. Only the end of the LAST one is the end of the block.
+    // of text. Even at the very end of the last one, which IS the end of the
+    // block, Enter stays in the paragraph and breaks the line.
     const island = lastIslandFor('#p4');
     const value = valueOf(island);
     const blocksBefore = document.querySelectorAll('#doc p').length;
 
     const ev = dispatchBeforeInput(island, 'insertParagraph', value.length);
     ok(ev.defaultPrevented, 'the browser default is cancelled');
-    eq(document.querySelectorAll('#doc p').length, blocksBefore + 1,
-       'Enter at the end of a block adds a new one');
-    eq(valueOf(island), value, 'and leaves the text it came from alone');
+    eq(document.querySelectorAll('#doc p').length, blocksBefore,
+       'Enter at the end of a paragraph does not start another paragraph');
+    eq(valueOf(island), value + BR, 'it breaks the line instead');
 
-    // The same key at the end of a run that is NOT the end of its block still
-    // breaks the line.
+    // The same key at the end of a run that is NOT the end of its block does
+    // the same thing.
     const firstRun = islandFor('#p4');
     const firstValue = valueOf(firstRun);
     dispatchBeforeInput(firstRun, 'insertParagraph', firstValue.length);
@@ -555,6 +556,23 @@ async function run() {
     dispatchBeforeInput(mid, 'insertParagraph', 2);
     eq(valueOf(mid), midValue.slice(0, 2) + BR + midValue.slice(2),
        'Enter in the middle of a run still inserts a line break');
+
+    // A bullet is the exception: finishing one means starting the next.
+    const bullet = lastIslandFor('#list li:last-child');
+    const bulletValue = valueOf(bullet);
+    const itemsBefore = document.querySelectorAll('#list li').length;
+
+    dispatchBeforeInput(bullet, 'insertParagraph', bulletValue.length);
+    eq(document.querySelectorAll('#list li').length, itemsBefore + 1,
+       'Enter at the end of a list item adds the next item');
+    eq(valueOf(bullet), bulletValue, 'and leaves the item it came from alone');
+
+    // Mid-bullet it still just breaks the line.
+    const midBullet = islandFor('#list li');
+    const midBulletValue = valueOf(midBullet);
+    dispatchBeforeInput(midBullet, 'insertParagraph', 1);
+    eq(valueOf(midBullet), midBulletValue.slice(0, 1) + BR + midBulletValue.slice(1),
+       'Enter in the middle of a list item still inserts a line break');
   }
 
   heading('adding — undo and redo');
@@ -600,6 +618,80 @@ async function run() {
     eq(singleDiff(before, afterAdd).removed, '', 'two additions at one anchor still replace nothing');
     ok(afterAdd.indexOf('\n  <p>One.</p>\n  <p>Two.</p>') !== -1,
        'and come out in the order they appear on the page');
+  }
+
+  heading('inserting a structure — cloned from the document');
+  {
+    // Anchor the insertion somewhere known: currentBlock() follows the caret.
+    caretTo(islandFor('#p5'), 0);
+    const before = QuickEditEditor.preview();
+
+    const tree = QuickEditEditor.insertStructure('table');
+    ok(!!tree, 'a table was inserted');
+    eq(tree.element.getAttribute('class'), 'grid', 'it took the donor table\'s class');
+    eq(tree.cells.length, 6,
+       'two columns from the donor: a header row and two body rows');
+    ok(!!tree.element.querySelector('thead'),
+       'and a header row, because the donor has one');
+    eq(tree.element.previousElementSibling.id, 'p5', 'it landed after the caret\'s block');
+
+    eq(QuickEditEditor.preview(), before,
+       'a structure nobody has typed into is not written to the file at all');
+
+    const cells = tree.cells.map((c) => c.island);
+    typeInto(cells[0], 'Measure');
+    typeInto(cells[1], 'Target');
+    typeInto(cells[2], 'Alpha');
+    typeInto(cells[3], 'one');
+    typeInto(cells[4], 'Beta');
+    typeInto(cells[5], 'two');
+
+    const edited = QuickEditEditor.preview();
+    const diff = singleDiff(before, edited);
+    eq(diff.removed, '', 'the whole table is one insertion that replaces nothing');
+
+    ok(edited.indexOf('<table class="grid">') !== -1, 'the table tag carries the class');
+    ok(edited.indexOf('<th>Measure</th>') !== -1, 'header cells are written');
+    ok(edited.indexOf('<td>Alpha</td>') !== -1, 'body cells are written');
+    ok(edited.indexOf('<td>two</td>') !== -1, 'every row is written');
+    ok(edited.indexOf('data-qe-island') === -1, 'no editing wrapper reached the file');
+    // Indented relative to the block it was added after, which sits at two
+    // spaces in this document.
+    ok(edited.indexOf('\n  <table class="grid">\n    <thead>\n      <tr>\n        <th>Measure</th>') !== -1,
+       'and it is laid out and indented like the markup around it');
+  }
+
+  heading('inserting a structure — a skeleton when there is nothing to clone');
+  {
+    ok(!document.querySelector('#doc blockquote'),
+       'the document has no blockquote to copy');
+    caretTo(islandFor('#p3'), 0);
+    const tree = QuickEditEditor.insertStructure('quote');
+    ok(!!tree, 'a quote was still inserted');
+    eq(tree.element.getAttribute('class'), null, 'with no class, because there was none to take');
+    eq(tree.cells.length, 1, 'and one run of text to type into');
+
+    typeInto(tree.cells[0].island, 'Nothing to copy here.');
+    ok(QuickEditEditor.preview().indexOf('<blockquote>Nothing to copy here.</blockquote>') !== -1,
+       'and it is written as a plain blockquote');
+  }
+
+  heading('inserting a structure — undo takes the whole thing back out');
+  {
+    caretTo(islandFor('#p3'), 0);
+    const before = QuickEditEditor.preview();
+    const tree = QuickEditEditor.insertStructure('bullets');
+    typeInto(tree.cells[0].island, 'A bullet.');
+    ok(QuickEditEditor.preview().indexOf('<li>A bullet.</li>') !== -1, 'the list is in the file');
+
+    QuickEditEditor.undo();       // the typing
+    QuickEditEditor.undo();       // the insertion
+    ok(!tree.element.isConnected, 'undo removed the list from the page');
+    eq(QuickEditEditor.preview(), before, 'and the file is back to what it was');
+
+    QuickEditEditor.redo();
+    ok(tree.element.isConnected, 'redo put it back');
+    QuickEditEditor.undo();       // leave the document as we found it
   }
 
   heading('adding — the file still parses to what is on screen');

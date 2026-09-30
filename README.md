@@ -1,8 +1,11 @@
 # Quick Edit
 
-A Chrome extension for fixing the words in a local HTML file without opening a
-code editor. Open the file in Chrome, click the icon, edit the text on the page,
-save.
+A Chrome extension for fixing the words in an HTML document without opening a
+code editor. Open it in Chrome, click the icon, edit the text on the page, save.
+
+Works on local files (`file://`) and on documents served from your own network —
+`localhost`, a LAN address, a NAS, a private mesh. Where the server accepts it,
+Save writes the file back in place.
 
 ## The one rule
 
@@ -24,7 +27,10 @@ deliberately changed, that is a bug, not a trade-off.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and choose this directory.
 
-### Enable file access — required
+### Enable file access — required for local files
+
+Only for `file://` documents. A document served over http(s) needs none of this:
+skip to [Using it](#using-it).
 
 Chrome does not let extensions read `file://` URLs unless you say so, per
 extension. Without it Quick Edit cannot read your file at all.
@@ -38,7 +44,8 @@ failing silently.
 
 ## Using it
 
-1. Open a local `.html` file in Chrome.
+1. Open an `.html` file in Chrome — from disk, or from a server on your own
+   network.
 2. Click the Quick Edit icon, then **Start editing**.
 3. Click any run of text and type. Editable text highlights faintly as you
    hover; the region you are in gets a solid outline, and anything you have
@@ -52,9 +59,12 @@ You can add another one of something: another paragraph after a paragraph,
 another bullet after a bullet, another heading after a heading. Three ways, all
 equivalent:
 
-- **Enter** with the caret at the very end of a block
-- **`Ctrl`/`Cmd` + `Enter`** from anywhere in it
-- the small **`+`** that appears just below a block when you hover it
+- **`Ctrl`/`Cmd` + `Enter`** from anywhere in the block
+- the small **`+`** that appears in the margin beside a block when you hover it
+- **Enter** at the very end of a **list item**, which starts the next one
+
+Enter elsewhere breaks the line rather than starting a new block, because inside
+a paragraph that is nearly always what was meant.
 
 The new block copies its neighbour's tag and `class`, so it looks the same, and
 lands with the same indentation. It does *not* copy the `id` — two elements with
@@ -62,6 +72,28 @@ one id would be invalid — or any other attribute.
 
 An added block you never type into is not written to the file at all. The status
 bar counts them so they do not disappear on you silently.
+
+### Adding a table, a list, a heading
+
+**Insert** in the status bar offers a table, a bullet or numbered list, a
+heading, a paragraph or a quote. It goes in after whatever you were last typing
+in.
+
+Each one is **copied from the nearest one already in the document**. A table
+takes that table's `class` and its column count, and gets a header row only if
+the one it was copied from has one. That is not a shortcut — it is the only way
+the result can be expected to look right. The document's stylesheet is not
+Quick Edit's to touch, so an inserted element has to be the kind of element the
+stylesheet already has an opinion about.
+
+Where the document has nothing of that kind to copy, you get a plain one with no
+class, which will look like whatever the document does to a bare `<table>` —
+possibly nothing. That is the honest outcome: guessing at CSS would make Quick
+Edit responsible for how your document looks, which it has always refused to be.
+
+As with an added block, a structure you type nothing into anywhere is not
+written to the file. One you type into is written whole, so a table with one
+filled cell still gets all its cells.
 
 ### Comments
 
@@ -96,7 +128,16 @@ the `×` on its card; a comment left empty is not written at all.
 | `Enter` | Line break, or a new block at the end of one |
 | `Ctrl`/`Cmd` + `Enter` | New block |
 
-Chrome cannot write back to a `file://` path, so Save is a download. The dialog
+### Saving
+
+For a **served** document whose server accepts a write-back, Save writes the
+file in place over the network and the button says so. The write is conditional
+on the `ETag` the document was read with, so a save cannot silently overwrite a
+change someone else made in the meantime, and the server keeps timestamped
+backups. See [server/README.md](server/README.md) — it is one dependency-free
+file to drop into an Express app.
+
+Otherwise Chrome cannot write back to a `file://` path, so Save is a download. The dialog
 opens on the original filename, and you can navigate back to the original and
 replace it — but that is your explicit choice, not something that happens
 quietly. Until you do, the original on disk is untouched.
@@ -111,6 +152,7 @@ would throw away every unsaved edit.
 | `activeTab` | Read the document in the one tab whose icon you clicked, until you navigate away. Chosen over a standing `file:///*` host permission so the extension has no access to anything unless you ask. |
 | `scripting` | Inject the editor on demand instead of auto-running on every local file you open. |
 | `downloads` | Chrome cannot write back to a `file://` path, so saving is a download. Used with `saveAs: true` so the OS dialog always opens. |
+| — | **Nothing at all is requested for http or https.** A content script's `fetch` carries the page's origin, so re-reading the document it is running on, and `PUT`ting it back, are ordinary same-origin requests. `activeTab` covers the injection and that is the whole story. |
 | `file:///*` — **optional** | Lets the service worker open the file itself. Not granted at install: the popup asks for it on a button press, Chrome shows its own consent prompt, and declining costs you one click per file instead. |
 
 There is no required `host_permissions`, no `storage`, and no network access of
@@ -139,7 +181,7 @@ The popup's details panel says which route was used.
 1. **Read the source.** The file's original bytes are read as a string (see
    above for the three routes) and kept as the source of truth. The DOM is never
    read back with `innerHTML`.
-2. **Tokenize the source** (`src/lib/tokenizer.js`). A single pass records every
+2. **Tokenize the source** (`packages/html-splice/src/tokenizer.js`). A single pass records every
    character range that the HTML parser will turn into a text node — skipping
    tags, comments and the doctype, and understanding raw-text elements, quoted
    attributes containing `>`, and the newline `<pre>` swallows.
@@ -159,7 +201,7 @@ The popup's details panel says which route was used.
    composition are allowed, and everything else — bold, lists, indentation,
    links, drops, and any input type Chrome invents next year — is refused.
    Pasting is intercepted and re-inserted as plain text.
-6. **Splice** (`src/lib/splice.js`). On save, only the ranges whose text changed
+6. **Splice** (`packages/html-splice/src/splice.js`). On save, only the ranges whose text changed
    are replaced, with the new text escaped for its context and the file's line
    ending style preserved. No edits means the source is returned unchanged, by
    construction.
@@ -178,16 +220,32 @@ offset.
 
 **By design**
 
-- **Text, blocks and comments.** You can change words, add another block like one
-  that is already there, and attach comments. You cannot move, delete or resize
-  elements, change CSS, classes, attributes or styles, or replace images. That
-  restraint is the feature; the additions were made deliberately, after the fact.
+- **Text, blocks, structures and comments.** You can change words, add another
+  block like one that is already there, insert a table or list copied from one
+  the document already has, and attach comments. You cannot move, delete or
+  resize elements, change CSS, classes, attributes or styles, or replace images.
+  That restraint is the feature; each addition was made deliberately, after the
+  fact, and each one still only ever *adds*.
 - **No overwrite in place.** Chrome cannot write to a `file://` path. See
   [Using it](#using-it).
-- **Local files only.** `http://` and `https://` pages are not supported.
+- **Private addresses only.** `file://`, plus http(s) on loopback, RFC1918,
+  link-local, IPv6 unique-local, `.local` names and `100.64.0.0/10` (where
+  Tailscale and similar meshes live). The path must still end in `.html`,
+  `.htm` or `.xhtml`.
+
+  This is not squeamishness — the model stops working on the open web. Quick
+  Edit's promise rests on re-fetching the document and getting back exactly the
+  bytes the browser parsed. That holds for a static file server. It does not
+  hold for anything that renders per request: the second fetch returns a
+  different document and the offsets describe text that is not on screen. It
+  fails safe (nothing verifies, so nothing is editable) but a page where nothing
+  is editable and no one can say why is a bad experience. Private addresses are
+  where documents-served-as-files actually live; public origins are
+  overwhelmingly applications. See `src/lib/origins.js`.
 - **The only markup Quick Edit writes** is a `<br>` from a line break, the blocks
-  you explicitly add, and the `<!-- comment: -->` notes you write. All of it
-  appears only where you asked for it.
+  and structures you explicitly add, and the `<!-- comment: -->` notes you
+  write. All of it appears only where you asked for it, and none of it is ever
+  produced by re-serialising something you wrote.
 - **The comment margin moves the page over** while it is open, by widening the
   page's right padding. It is put back when you leave edit mode, and the file
   never hears about it — but on an unusual layout it may look odd while open.
@@ -229,8 +287,10 @@ offset.
 ## Tests
 
 ```
-./test/run.sh          # everything: node unit tests + two headless Chrome suites
-node test/node-test.js # tokenizer, splice and write-back only, no browser needed
+./test/run.sh          # everything: three node suites + three headless Chrome suites
+node test/node-test.js # editor-level: islands, blocks, comments, write-back
+node packages/html-splice/test/engine-test.js   # the engine on its own
+node server/test-save.js                        # the save-in-place route
 ```
 
 See [test/README.md](test/README.md) for what each suite covers, and
@@ -245,13 +305,17 @@ manifest.json           permissions, with the justification for each
 src/background.js       service worker: injection, downloads, toolbar badge
 src/content.js          reads the source, builds the map, routes messages
 src/editor.js           edit mode: constraints, history, status bar, saving
-src/lib/tokenizer.js    source text -> character ranges
+src/lib/origins.js      which documents Quick Edit will touch, and why
+src/lib/structures.js   inserted tables and lists, cloned from the document
 src/lib/mapping.js      character ranges <-> DOM text nodes, verified
 src/lib/islands.js      the contenteditable wrappers and their values
 src/lib/blocks.js       where an added block goes, and what it looks like
 src/lib/comments.js     reading and writing notes as HTML comments
 src/lib/prompt.js       the in-page card that asks you to choose the file
-src/lib/splice.js       escaping and offset splicing
+packages/html-splice/   the engine, as a standalone package
+  src/tokenizer.js      source text -> character ranges
+  src/splice.js         escaping and offset splicing
+server/                 optional: save-in-place for a static file server
 src/popup/              toolbar popup and the file-access diagnostic
 test/                   fixtures, suites, and the preservation procedure
 ```

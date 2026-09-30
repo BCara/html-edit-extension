@@ -100,4 +100,9 @@
     replacementFor: replacementFor,
     applyEdits: applyEdits
   };
+
+  // CommonJS, for use outside a browser. The browser global above is what the
+  // Chrome extension's injected scripts bind to; `module` is undefined there,
+  // so this is skipped and nothing changes for them.
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.QuickEditSplice;
 })(typeof self !== 'undefined' ? self : globalThis);

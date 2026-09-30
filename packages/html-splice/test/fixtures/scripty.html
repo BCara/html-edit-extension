@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Script and style content</title>
+<style>
+  /* A CSS comment containing <p>markup</p> and an entity &amp; */
+  .banner::after { content: "\003C /style> is not really here"; }
+  p { color: #333; }
+</style>
+</head>
+<body>
+<h1>Heading above the script</h1>
+<p>Editable paragraph between the script blocks.</p>
+<script>
+  var html = "<p>This looks like a paragraph but is a string literal.</p>";
+  var closing = 'not a real </div> either';
+  var cmp = 3 < 5 && 7 > 2;
+  document.title = document.title;
+  console.log(html, closing, cmp);
+</script>
+<p>Another editable paragraph after the script.</p>
+<script type="application/json">
+  {"label": "Inline JSON <b>not editable</b>", "n": 3}
+</script>
+<div onclick="alert('inline handler text is an attribute, not a text node')">Editable div text</div>
+</body>
+</html>

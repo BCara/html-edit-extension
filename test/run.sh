@@ -9,12 +9,25 @@ CHROME="${CHROME:-$(command -v google-chrome || command -v google-chrome-stable 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
+echo "== node: origins and the write-back probe =="
+node "$DIR/src/lib/origins.test.js" || NODE_FAIL=1
+
+echo
 echo "== node: tokenizer + splice =="
 node "$DIR/test/node-test.js" || NODE_FAIL=1
 
 echo
-echo "== generating the ~1MB fixture =="
+echo "== node: the engine as a standalone package =="
+node "$DIR/packages/html-splice/test/engine-test.js" || NODE_FAIL=1
+
+echo
+echo "== node: save-in-place route =="
+node "$DIR/server/test-save.js" || NODE_FAIL=1
+
+echo
+echo "== generating the ~1MB fixtures =="
 node "$DIR/test/make-large.js"
+node "$DIR/packages/html-splice/test/make-large.js"
 
 if [ -z "$CHROME" ]; then
   echo
@@ -67,8 +80,43 @@ run_page editor-test.html "edit mode, end to end" "$FLAG" || BROWSER_FAIL=1
 # No flag here, on purpose. See the comment in the page.
 run_page file-read-test.html "file read constraints (no flag)" || BROWSER_FAIL=1
 
+# The web app has to be served: it loads its own index.html in a frame, and
+# file:// frames are not same-origin with their parent.
 echo
-if [ -n "${BROWSER_FAIL:-}" ] || [ -n "${NODE_FAIL:-}" ]; then
+echo "== headless Chrome: the web app =="
+PORT=8455
+node -e '
+const http=require("http"),fs=require("fs"),path=require("path");
+const root=process.argv[1];
+const T={".html":"text/html;charset=utf-8",".js":"text/javascript;charset=utf-8",".css":"text/css;charset=utf-8"};
+http.createServer((req,res)=>{
+  const f=path.join(root,decodeURIComponent(req.url.split("?")[0]));
+  if(!f.startsWith(root)||!fs.existsSync(f)||fs.statSync(f).isDirectory()){res.writeHead(404);return res.end("no");}
+  res.writeHead(200,{"Content-Type":T[path.extname(f)]||"application/octet-stream"});
+  fs.createReadStream(f).pipe(res);
+}).listen('"$PORT"');
+' "$DIR" &
+SERVER_PID=$!
+
+# Wait for it to actually answer rather than guessing at a second. A fixed
+# sleep made this suite fail intermittently, which is worse than not having it.
+for _ in $(seq 1 50); do
+  if curl -sf -o /dev/null "http://127.0.0.1:$PORT/app/index.html"; then break; fi
+  sleep 0.2
+done
+
+# Chrome does not exit on its own against a live server, so it is given a
+# deadline; the DOM it dumped before the deadline is what we read.
+timeout 60 "$CHROME" --headless=new --disable-gpu --no-sandbox \
+  --user-data-dir="$WORK/appprofile" --virtual-time-budget=20000 \
+  --dump-dom "http://127.0.0.1:$PORT/app/test/app-test.html" \
+  > "$WORK/app.dom.html" 2>"$WORK/app.log" || true
+kill $SERVER_PID 2>/dev/null || true
+
+node "$DIR/test/extract-results.js" "$WORK/app.dom.html" || APP_FAIL=1
+
+echo
+if [ -n "${BROWSER_FAIL:-}" ] || [ -n "${NODE_FAIL:-}" ] || [ -n "${APP_FAIL:-}" ]; then
   echo "SUITE FAILED"
   exit 1
 fi

@@ -48,6 +48,13 @@ const READ_LABELS = {
   'service worker': 'read directly',
   'page fetch': 'read directly (page fetch)',
   'file picker': 'you chose the file by hand',
+  server: 'fetched from the server',
+};
+
+// Where Save will put it. Worth stating up front: these are different acts.
+const WRITE_LABELS = {
+  server: 'back to the server, in place',
+  download: 'a download you place yourself',
 };
 
 function render(res) {
@@ -77,6 +84,7 @@ function render(res) {
 
   const rows = [
     ['Read via', READ_LABELS[res.readVia] || res.readVia || 'unknown'],
+    ['Save writes', WRITE_LABELS[res.writeBack] || WRITE_LABELS.download],
     ['Editable text regions', res.stats.editable],
     ['Text nodes in document', res.stats.nodes],
     ['Text spans in source', res.stats.spans],
@@ -116,9 +124,20 @@ function renderProblem(res) {
     return;
   }
 
-  if (res.code === 'not-local-html') {
-    show('Quick Edit only works on local HTML files — a page opened from ' +
-         '<code>file://</code> ending in <code>.html</code> or <code>.htm</code>.');
+  if (res.code === 'not-editable') {
+    // Say which rule was not met, rather than restating all of them.
+    if (res.reason === 'public-origin') {
+      show('This page is on the public internet. Quick Edit edits documents, not ' +
+           'websites, so it works on <code>file://</code> pages and on servers ' +
+           'inside your own network — <code>localhost</code>, a LAN address like ' +
+           '<code>192.168.x.x</code>, or a private mesh.');
+    } else if (res.reason === 'not-html') {
+      show('Quick Edit needs an HTML document — a path ending in ' +
+           '<code>.html</code> or <code>.htm</code>.');
+    } else {
+      show('Quick Edit works on local HTML files and on HTML served from your own ' +
+           'network. This page is neither.');
+    }
     return;
   }
   if (res.code === 'no-file-access') {
@@ -219,10 +238,19 @@ document.getElementById('open-extensions').addEventListener('click', () => {
  * On open: if the file permission is already granted, go straight to scanning.
  * If not, offer it once before doing anything that would need it.
  */
-chrome.runtime.sendMessage({ type: 'quickEdit:hasFilePermission' }, (res) => {
-  if (chrome.runtime.lastError || (res && res.granted)) {
+chrome.runtime.sendMessage({ type: 'quickEdit:classifyActive' }, (info) => {
+  // A document served over http(s) is read with an ordinary same-origin fetch,
+  // so none of the file:// permission machinery applies to it. Going straight
+  // to the scan is not a shortcut — there is genuinely nothing to ask for.
+  if (chrome.runtime.lastError || !info || info.kind !== 'file') {
     ask({ type: 'quickEdit:inspect' });
-  } else {
-    showSetup();
+    return;
   }
+  chrome.runtime.sendMessage({ type: 'quickEdit:hasFilePermission' }, (res) => {
+    if (chrome.runtime.lastError || (res && res.granted)) {
+      ask({ type: 'quickEdit:inspect' });
+    } else {
+      showSetup();
+    }
+  });
 });
