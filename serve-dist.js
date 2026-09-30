@@ -110,6 +110,8 @@ http.createServer((req, res) => {
   const [pathname, query] = (req.url || '/').split('?');
   if (pathname === '/fetch') {
     const target = new URLSearchParams(query || '').get('url');
+    // A bare HEAD/GET of /fetch is how the page asks whether a proxy exists at
+    // all, so answer 400 rather than 404: the distinction is the whole probe.
     if (!target) { res.writeHead(400); return res.end('no url given'); }
     return proxy(req, res, target);
   }

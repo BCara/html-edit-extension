@@ -432,21 +432,49 @@ function watchUnsaved() {
  * nothing to be done in the page, and saying so beats a blocked request and a
  * console error nobody sees.
  */
-function resolveSrc(src) {
-  var mixed = location.protocol === 'https:' && /^http:\/\//i.test(src);
-  if (!mixed) return Promise.resolve(src);
+var proxyAvailable = null;     // unknown until asked, then remembered
 
-  return fetch('fetch?url=' + encodeURIComponent(src), { method: 'HEAD' })
+function hasProxy() {
+  if (proxyAvailable !== null) return Promise.resolve(proxyAvailable);
+  return fetch('fetch', { method: 'HEAD' })
     .then(function (r) {
-      if (r.ok) return 'fetch?url=' + encodeURIComponent(src);
-      throw new Error('proxy said ' + r.status);
+      // 400 means it is there and wants a url; 404 means there is no proxy.
+      proxyAvailable = r.status !== 404;
+      return proxyAvailable;
     })
-    .catch(function () {
+    .catch(function () { proxyAvailable = false; return false; });
+}
+
+/*
+ * Where to fetch a document from, given where this page is running.
+ *
+ * Prefer the host's own /fetch when it has one. It is on this origin, so it is
+ * reachable whenever the app itself is, and it solves two problems that would
+ * otherwise bite in opposite situations:
+ *
+ *   - the page is on https and the document on http, which no browser will mix
+ *   - the page is reached from outside the network the document lives on — over
+ *     a mesh, say — so this device cannot route to 192.168.x at all, while the
+ *     machine serving the app is sitting on that network and can
+ *
+ * Without a proxy, which is any static host, the page fetches directly and that
+ * works whenever the browser can see the document's host itself.
+ */
+function resolveSrc(src) {
+  var absolute = /^https?:\/\//i.test(src);
+  if (!absolute) return Promise.resolve(src);
+
+  return hasProxy().then(function (available) {
+    if (available) return 'fetch?url=' + encodeURIComponent(src);
+
+    if (location.protocol === 'https:' && /^http:\/\//i.test(src)) {
       throw new Error(
         'This page is on https and that document is on http, which browsers ' +
         'will not mix. Serve the document over https, or open the app over ' +
         'http, or download the file and open it with the button above.');
-    });
+    }
+    return src;
+  });
 }
 
 function openFromQuery() {
