@@ -473,8 +473,8 @@
    *
    * collectEdits skips the cells; collectStructureEdits emits the tree once.
    */
-  function insertStructure(id) {
-    var block = currentBlock();
+  function insertStructure(id, where) {
+    var block = where || currentBlock();
     if (!block) { flash('Quick Edit cannot tell where to put that in the file'); return null; }
 
     var anchor = anchorForBlock(block);
@@ -792,9 +792,10 @@
 
     // Esc closes the insert menu, and is checked before the modifier gate
     // below because it carries no modifier.
-    if (e.key === 'Escape' && isMenuOpen()) {
+    if (e.key === 'Escape' && (isMenuOpen() || isAddMenuOpen())) {
       e.preventDefault();
       setMenuOpen(false);
+      if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
       return;
     }
 
@@ -866,6 +867,31 @@
     'button:hover { filter: brightness(1.15); }',
     'button.block { background: #5b52f0; }',
     'button.note { background: #d9a01e; }',
+    // Subordinate on purpose: adding another of what is already there is the
+    // common case and stays one click on the + . This is the way to the rest.
+    'button.more {',
+    '  background: #6b7280; width: 18px; height: 18px; font-size: 10px;',
+    '  align-self: center;',
+    '}',
+    '.menu[hidden] { display: none; }',
+    '.menu {',
+    '  position: absolute; left: 100%; top: 0; margin-left: 7px;',
+    '  min-width: 166px; padding: 5px; z-index: 1;',
+    '  display: flex; flex-direction: column; gap: 2px;',
+    '  border-radius: 10px;',
+    '  background: rgba(22, 22, 27, .97);',
+    '  box-shadow: 0 4px 22px rgba(0, 0, 0, .42);',
+    '  font: 12px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
+    '}',
+    '.menu button {',
+    '  width: auto; height: auto; border-radius: 7px; padding: 7px 10px;',
+    '  justify-content: flex-start; text-align: left; white-space: nowrap;',
+    '  background: transparent; box-shadow: none; font-weight: 400;',
+    '  font-size: 12px;',
+    '}',
+    '.menu button:hover { background: rgba(255, 255, 255, .16); filter: none; }',
+    '.menu .sep { height: 1px; margin: 3px 4px; background: rgba(255,255,255,.14); }',
+    '.menu .same { font-weight: 600; }',
     'svg { width: 12px; height: 12px; fill: currentColor; display: block; }',
   ].join('\n');
 
@@ -883,17 +909,52 @@
     shadow.innerHTML = '<style>' + ADD_CSS + '</style>' +
       '<div class="row">' +
         '<button class="block" title="Add another one of these">+</button>' +
+        '<button class="more" title="Insert something else here">\u25be</button>' +
         '<button class="note" title="Comment on this section">' +
           '<svg viewBox="0 0 16 16" aria-hidden="true">' +
           '<path d="M3 2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7l-3.6 2.8V12H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>' +
           '</svg>' +
         '</button>' +
+        '<div class="menu" hidden>' +
+          '<button class="same" data-same="1"></button>' +
+          '<div class="sep"></div>' +
+          Structures.KINDS.map(function (k) {
+            return '<button data-kind="' + k.id + '">' + k.label + '</button>';
+          }).join('') +
+        '</div>' +
       '</div>';
 
     shadow.querySelector('.block').addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
       if (state.hoverBlock) addAfterBlock(state.hoverBlock);
+    });
+
+    /*
+     * The + adds another of whatever is already there, in one click, because
+     * that is nearly always what is wanted and it is the reason the button
+     * exists. This opens the rest — a table, a list, a heading — inserted in
+     * the same place, which is the point: the controls are already beside the
+     * block, so there is no question of where the new thing goes.
+     */
+    var menu = shadow.querySelector('.menu');
+    shadow.querySelector('.more').addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      setAddMenuOpen(menu.hidden);
+    });
+
+    menu.addEventListener('mousedown', function (e) {
+      var btn = e.target.closest && e.target.closest('button');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var block = state.hoverBlock;
+      setAddMenuOpen(false);
+      hideAdd();
+      if (!block) return;
+      if (btn.hasAttribute('data-same')) addAfterBlock(block);
+      else insertStructure(btn.getAttribute('data-kind'), block);
     });
     shadow.querySelector('.note').addEventListener('click', function (e) {
       e.preventDefault();
@@ -907,8 +968,34 @@
     host.addEventListener('mouseleave', requestHideAdd);
 
     doc().documentElement.appendChild(host);
-    state.add = { host: host, row: shadow.querySelector('.row') };
+    state.add = {
+      host: host,
+      row: shadow.querySelector('.row'),
+      menu: menu,
+      same: shadow.querySelector('.same'),
+    };
     return state.add;
+  }
+
+  /*
+   * The insert menu hanging off the hover controls.
+   *
+   * While it is open the controls must not be taken away, however far the
+   * pointer wanders — the user is reading a menu, not leaving.
+   */
+  function setAddMenuOpen(open) {
+    if (!state.add) return;
+    state.add.menu.hidden = !open;
+    if (open) {
+      clearAddHide();
+      // Name the thing the default would add, so the menu says what the + does.
+      var tag = state.hoverBlock ? state.hoverBlock.localName : 'block';
+      state.add.same.textContent = 'Another ' + tag;
+    }
+  }
+
+  function isAddMenuOpen() {
+    return !!(state.add && !state.add.menu.hidden);
   }
 
   function clearAddHide() {
@@ -919,6 +1006,7 @@
   }
 
   function hideAdd() {
+    setAddMenuOpen(false);
     clearAddHide();
     if (state.add) state.add.host.style.setProperty('display', 'none', 'important');
     state.hoverBlock = null;
@@ -942,6 +1030,7 @@
    * are on your way to them.
    */
   function requestHideAdd() {
+    if (isAddMenuOpen()) return;
     if (!state.add || !state.hoverBlock || state.addHideTimer) return;
     state.addHideTimer = setTimeout(function () {
       state.addHideTimer = 0;
@@ -1004,9 +1093,10 @@
   }
 
   function onMouseDownAnywhere() {
-    // The bar's own handlers stopPropagation, so reaching here means the click
-    // was somewhere else.
+    // The bar's and the hover controls' own handlers stopPropagation, so
+    // reaching here means the click was somewhere else.
     if (isMenuOpen()) setMenuOpen(false);
+    if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
   }
 
   function onMouseOver(e) {

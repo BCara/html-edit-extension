@@ -677,6 +677,23 @@ async function run() {
        'and it landed after the block the caret was last in');
   }
 
+  heading('inserting a structure — at the block the + belongs to');
+  {
+    // The hover controls sit beside a block, so what they insert goes there,
+    // whatever the caret happens to be doing. That is the whole reason for
+    // offering the menu from the + rather than only from the toolbar.
+    caretTo(islandFor('#p3'), 0);          // caret deliberately somewhere else
+    const target = document.querySelector('#p1');
+    const tree = QuickEditEditor.insertStructure('bullets', target);
+    ok(!!tree, 'a list was inserted');
+    eq(tree.element.previousElementSibling.id, 'p1',
+       'directly after the block it was opened from, not where the caret was');
+
+    typeInto(tree.cells[0].island, 'From the plus.');
+    ok(QuickEditEditor.preview().indexOf('<li>From the plus.</li>') !== -1,
+       'and it reaches the file');
+  }
+
   heading('inserting a structure — a skeleton when there is nothing to clone');
   {
     ok(!document.querySelector('#doc blockquote'),
