@@ -22,7 +22,11 @@
     ':host { all: initial; }',
     '.card {',
     '  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
+    // A filename can be any length, and this card sits 16px from the edge of
+    // the window, so the width is a maximum rather than a fixed size.
     '  width: 300px;',
+    '  max-width: calc(100vw - 32px);',
+    '  box-sizing: border-box;',
     '  padding: 14px 15px;',
     '  border-radius: 10px;',
     '  background: rgba(22, 22, 27, .95);',
@@ -34,11 +38,20 @@
     '.body { color: #b8bdc9; }',
     '.error { color: #ff9f9f; margin-top: 8px; }',
     '.error:empty { display: none; }',
-    '.row { display: flex; gap: 8px; margin-top: 12px; }',
+    '.row { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }',
     'button {',
     '  font: inherit; border: 0; border-radius: 7px; padding: 6px 13px;',
     '  cursor: pointer; background: rgba(255, 255, 255, .13); color: inherit;',
     '}',
+    // The primary button names the file, which can be longer than the card.
+    // Clip it rather than let it push the row off the side; the full name is
+    // on the button's title, and in the body text above it.
+    '.go {',
+    '  flex: 1 1 auto; min-width: 0;',
+    '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;',
+    '  text-align: left;',
+    '}',
+    '.cancel { flex: none; }',
     'button:hover { background: rgba(255, 255, 255, .22); }',
     'button.primary { background: #5b52f0; }',
     'button.primary:hover { background: #6d64ff; }',
@@ -80,7 +93,9 @@
 
     shadow.querySelector('.title').textContent = options.title;
     shadow.querySelector('.body').textContent = options.body;
-    shadow.querySelector('.go').textContent = options.action;
+    var go = shadow.querySelector('.go');
+    go.textContent = options.action;
+    go.title = options.action;
 
     document.documentElement.appendChild(host);
     current = { host: host, shadow: shadow };

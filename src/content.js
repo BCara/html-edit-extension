@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.5.0';
+  var VERSION = '0.5.1';
   var REQUIRED = [
     'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
     'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
@@ -68,6 +68,7 @@
     readVia: null,    // which of the routes below actually worked
     readError: null,  // why the earlier ones did not
     served: null,     // for an http(s) document: how to write it back
+    reading: null,    // the in-flight read, so two messages cannot start two
   };
 
   function send(message) {
@@ -265,8 +266,27 @@
     });
   }
 
+  /*
+   * Read the file and build the map, once.
+   *
+   * The in-flight promise is held, not just the finished flag. The popup sends
+   * inspect and then toggle in quick succession; both used to arrive before
+   * state.ready was set, both started a read, and both put up a card asking the
+   * user to choose the file. Answering one started the editor and left the
+   * other on screen for ever, with nothing left to dismiss it.
+   */
   function ensureReady() {
     if (state.ready) return Promise.resolve(state);
+    if (state.reading) return state.reading;
+
+    state.reading = startReading();
+    // A failed read must not poison later attempts: the user may have simply
+    // cancelled the picker, and the next click should ask again.
+    state.reading.catch(function () { state.reading = null; });
+    return state.reading;
+  }
+
+  function startReading() {
     return domReady().then(function () {
       return readSource(location.href);
     }).then(function (source) {
