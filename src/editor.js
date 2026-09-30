@@ -113,6 +113,7 @@
     byElement: null,      // blocks we added -> their region
     add: null,            // the hover controls
     hoverBlock: null,
+    lastIsland: null,     // the island the caret was last in, for Insert
     addHideTimer: 0,      // grace period while the pointer crosses to the buttons
     comments: [],         // comment regions, existing and new
     rail: null,           // the margin the cards live in
@@ -432,9 +433,20 @@
    * Never nothing — the toolbar should not fail for want of a destination.
    */
   function currentBlock() {
-    var focused = islandOf(doc().activeElement);
-    if (focused) {
-      var block = Blocks.blockFor(focused);
+    /*
+     * Where the caret is, or was.
+     *
+     * activeElement alone is not enough: pressing Insert moves focus to the
+     * toolbar, so by the time this runs the caret is no longer in the text the
+     * user was editing, and the answer would be whatever the document happened
+     * to end with. The last island focused is the one they mean.
+     */
+    var island = islandOf(doc().activeElement);
+    if (!island && state.lastIsland && state.lastIsland.isConnected) {
+      island = state.lastIsland;
+    }
+    if (island) {
+      var block = Blocks.blockFor(island);
       if (block && canAddAfter(block)) return block;
     }
     if (state.hoverBlock && canAddAfter(state.hoverBlock)) return state.hoverBlock;
@@ -983,6 +995,14 @@
     ui.host.style.setProperty('display', 'block', 'important');
   }
 
+  // Remember where the caret has been, so Insert still knows after the toolbar
+  // has taken focus away. Focus moving into the toolbar is not an island, so it
+  // leaves the last one standing, which is exactly what is wanted.
+  function onFocusIn(e) {
+    var island = islandOf(e.target);
+    if (island) state.lastIsland = island;
+  }
+
   function onMouseDownAnywhere() {
     // The bar's own handlers stopPropagation, so reaching here means the click
     // was somewhere else.
@@ -1020,6 +1040,7 @@
     ['drop', onDrop, true],
     ['dragover', onDragOver, true],
     ['keydown', onKeyDown, true],
+    ['focusin', onFocusIn, true],
     ['mouseover', onMouseOver, true],
     ['mousedown', onMouseDownAnywhere, false],
     ['click', onClick, true],
@@ -1441,10 +1462,16 @@
     };
     // mousedown, not click: by click time the caret has already left the text
     // the user was editing, and undo would restore it somewhere they cannot see.
-    ui.insert.addEventListener('click', function (e) {
+    // mousedown with the default prevented, so opening the menu does not pull
+    // the caret out of the text. currentBlock() can recover from that, but not
+    // losing it in the first place is better: the page does not jump and the
+    // user's selection survives.
+    ui.insert.addEventListener('mousedown', function (e) {
+      e.preventDefault();
       e.stopPropagation();
       setMenuOpen(ui.menu.hidden);
     });
+    ui.insert.addEventListener('click', function (e) { e.stopPropagation(); });
     // mousedown, not click: the menu closes on the document's click, and by
     // then this button no longer exists to have been clicked.
     ui.menu.addEventListener('mousedown', function (e) {

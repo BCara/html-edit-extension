@@ -661,6 +661,22 @@ async function run() {
        'and it is laid out and indented like the markup around it');
   }
 
+  heading('inserting a structure — it goes where the caret was, not where focus is');
+  {
+    // The real complaint this fixes: pressing Insert moves focus to the
+    // toolbar, so activeElement is no longer the text being edited. What the
+    // user means is the last place the caret actually was.
+    caretTo(islandFor('#p2'), 0);
+    const island = islandFor('#p2');
+    island.blur();                       // exactly what pressing a button does
+    ok(document.activeElement !== island, 'focus has left the text, as it would');
+
+    const tree = QuickEditEditor.insertStructure('paragraph');
+    ok(!!tree, 'a paragraph was inserted');
+    eq(tree.element.previousElementSibling.id, 'p2',
+       'and it landed after the block the caret was last in');
+  }
+
   heading('inserting a structure — a skeleton when there is nothing to clone');
   {
     ok(!document.querySelector('#doc blockquote'),
