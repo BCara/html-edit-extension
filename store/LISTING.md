@@ -72,7 +72,7 @@ For a document served over your network, Save can write the file back in place, 
 
 YOUR NAME, AND WHAT CHANGED
 
-Add your name once and it goes on the comments you leave. A list of changes shows everything Save would write, paragraph by paragraph, with who made each change. Names are whatever each person types — there is no sign-in — which is what a team that trusts each other needs, and it says so.
+Add your name once and it goes on the comments you leave. A list of changes shows everything Save would write, paragraph by paragraph, with who made each change. Names are whatever each person types — there is no sign-in — which is what a team that trusts each other needs.
 
 WHAT IT DOES NOT DO
 

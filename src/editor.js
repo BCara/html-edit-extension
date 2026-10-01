@@ -707,6 +707,7 @@
     if (state.historyAt === 0) { flash('Nothing to undo'); return; }
     var entry = state.history[--state.historyAt];
     if (entry.kind === 'add') setAdded(entry.region, false);
+    else if (entry.kind === 'remove-added') setAdded(entry.region, true);
     else if (entry.kind === 'multi') applyMulti(entry, false);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, true);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, false);
@@ -719,6 +720,7 @@
     if (state.historyAt >= state.history.length) { flash('Nothing to redo'); return; }
     var entry = state.history[state.historyAt++];
     if (entry.kind === 'add') setAdded(entry.region, true);
+    else if (entry.kind === 'remove-added') setAdded(entry.region, false);
     else if (entry.kind === 'multi') applyMulti(entry, true);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, false);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, true);
@@ -870,8 +872,71 @@
     return (here === region || here.tree === region) ? region : null;
   }
 
+  /*
+   * The added item the caret is in, if nothing has been typed into it — the
+   * whole of it, for a table: one empty cell in a table with words elsewhere
+   * is not an empty table. A line break on its own is not text.
+   *
+   * Unlike pendingInsert(), any added item qualifies, however long ago it was
+   * added: the user can click into an empty paragraph they added earlier and
+   * press Delete to be rid of it. What never qualifies is anything that came
+   * from the file — those regions are kind 'text', not 'insert' or 'cell' —
+   * so no key press here can remove a single byte of the original document.
+   */
+  function blank(value) {
+    return !value || !value.split(Islands.BR).join('').trim();
+  }
+
+  function emptyAddedHere() {
+    var island = islandOf(doc().activeElement);
+    var here = island && state.byIsland.get(island);
+    if (!here) return null;
+    var item = here.kind === 'insert' ? here : here.kind === 'cell' ? here.tree : null;
+    if (!item || item.removed) return null;
+    var empty = item.kind === 'tree'
+      ? item.cells.every(function (c) { return blank(c.current); })
+      : blank(item.current);
+    return empty ? item : null;
+  }
+
+  // The editable island just before `el` in the document, for the caret to
+  // land in once `el` is gone; failing that, the first one after it.
+  function islandBeside(el) {
+    var islands = doc().querySelectorAll('[' + Islands.ATTR + ']');
+    var before = null, after = null;
+    for (var i = 0; i < islands.length; i++) {
+      var isl = islands[i];
+      if (el.contains(isl) || !isl.isConnected) continue;
+      if (el.compareDocumentPosition(isl) & Node.DOCUMENT_POSITION_PRECEDING) before = isl;
+      else if (!after) after = isl;
+    }
+    return before || after;
+  }
+
+  /*
+   * Take an empty added item out, as its own undoable step. The newest one
+   * goes through undo(), so history does not keep an add and its removal
+   * side by side for nothing; an older one is removed with an entry of its
+   * own, so Ctrl/Cmd+Z brings it back exactly where it was.
+   */
+  function removeAdded(item) {
+    var land = islandBeside(item.element);
+    if (pendingInsert() === item) {
+      undo();
+    } else {
+      setAdded(item, false);
+      pushHistory({ kind: 'remove-added', region: item });
+      refresh();
+    }
+    if (land) {
+      land.focus();
+      Islands.setCaret(land, Islands.readValue(land).length);
+    }
+    flash('Removed the ' + insertName(item) + ' \u2014 Ctrl/Cmd+Z brings it back');
+  }
+
   function insertName(region) {
-    if (region.kind !== 'tree') return 'new block';
+    if (region.kind !== 'tree') return region.template ? describeTag(region.template.tag) : 'new block';
     var what = Structures.kindById(region.id);
     return what ? what.label.toLowerCase() : 'new block';
   }
@@ -891,9 +956,20 @@
       return;
     }
 
-    // Undo rather than a bare removal, so a mistaken press is itself undoable
-    // and the region's bookkeeping unwinds the one way it knows how.
-    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'Delete') {
+    // Delete and Backspace remove any empty added item the caret is in.
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      var empty = emptyAddedHere();
+      if (empty) {
+        e.preventDefault();
+        removeAdded(empty);
+        return;
+      }
+    }
+
+    // Esc means "not that", so it only ever cancels the thing just inserted —
+    // never an older one the user has come back to. Through undo(), so a
+    // mistaken press is itself undoable.
+    if (e.key === 'Escape') {
       var fresh = pendingInsert();
       if (fresh) {
         e.preventDefault();
@@ -2211,7 +2287,7 @@
 
     var note = doc().createElement('div');
     note.className = 'c-note';
-    note.textContent = 'What Save would write. Names are whatever each person typed in, not verified.';
+    note.textContent = 'What Save would write.';
     box.appendChild(note);
 
     var ol = doc().createElement('ol');

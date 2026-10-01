@@ -118,8 +118,7 @@ Click the change count in the bar — "2 changes" — for the list of everything
 Save would write, a paragraph per row, with who made each change and a
 word-by-word view of it.
 
-Names are self-declared. There is no sign-in, so anyone can type any name; the
-list says so.
+Names are self-declared. There is no sign-in, so anyone can type any name.
 
 ### Comments
 

@@ -881,22 +881,75 @@ async function run() {
     QuickEditEditor.undo();       // the insertion
   }
 
-  heading('a thing that was already in the document is never removed this way');
+  heading('an empty added item goes on Delete wherever it is, not only the newest');
   {
-    // The case this must not get wrong: an empty cell in a table the user
-    // merely clicked into looks exactly like an empty cell in a new one.
+    // The user's case: click back into something they added earlier, find it
+    // still empty, press Delete.
     caretTo(islandFor('#p3'), 0);
     const tree = QuickEditEditor.insertStructure('table');
-    typeInto(islandFor('#p3'), '!');      // something else becomes the last thing done
+    typeInto(islandFor('#p3'), '!');      // something else is now the last thing done
+    const withTyping = QuickEditEditor.preview();
 
     caretTo(tree.cells[0].island, 0);
-    press('Delete');
-    ok(tree.element.isConnected, 'the table is left where it is');
     press('Escape');
-    ok(tree.element.isConnected, 'by both keys');
+    ok(tree.element.isConnected, 'Esc does not remove an older one — Esc cancels, it does not delete');
 
-    QuickEditEditor.undo();       // the typing
-    QuickEditEditor.undo();       // the insertion
+    ok(!press('Delete'), 'Delete is handled in an empty added table');
+    ok(!tree.element.isConnected, 'and the table is removed, though it was not the last thing added');
+    eq(QuickEditEditor.preview(), withTyping, 'nothing else in the file moved');
+    ok(document.activeElement && document.activeElement.hasAttribute('data-qe-island'),
+       'the caret lands in the text beside it rather than nowhere');
+
+    QuickEditEditor.undo();
+    ok(tree.element.isConnected, 'one undo brings it back');
+    QuickEditEditor.redo();
+    ok(!tree.element.isConnected, 'and redo removes it again');
+    QuickEditEditor.undo();               // the removal
+    QuickEditEditor.undo();               // the typing
+    QuickEditEditor.undo();               // the insertion
+  }
+
+  heading('the same for a paragraph added with the +');
+  {
+    const region = QuickEditEditor.addAfterIsland(islandFor('#p3'));
+    ok(!!region && region.element.isConnected, 'the + added a paragraph');
+    typeInto(islandFor('#p3'), '?');      // not the newest any more
+    caretTo(region.island, 0);
+    press('Delete');
+    ok(!region.element.isConnected, 'and Delete in it, empty, removes it');
+    QuickEditEditor.undo();
+    ok(region.element.isConnected, 'undo brings it back');
+    QuickEditEditor.undo();               // the typing
+    QuickEditEditor.undo();               // the addition
+  }
+
+  heading('an added paragraph with words in it is not removed');
+  {
+    caretTo(islandFor('#p3'), 0);
+    const para = QuickEditEditor.insertStructure('paragraph');
+    typeInto(para.cells[0].island, 'Kept.');
+    typeInto(islandFor('#p3'), '!');
+    caretTo(para.cells[0].island, 0);
+    press('Delete');
+    ok(para.element.isConnected, 'Delete is an ordinary Delete once there are words in it');
+    QuickEditEditor.undo();
+    QuickEditEditor.undo();
+    QuickEditEditor.undo();
+  }
+
+  heading('nothing that came from the file is ever removed by a key');
+  {
+    // The case this must not get wrong: emptying a paragraph that was in the
+    // file is editing it, and Delete in it must stay an ordinary Delete.
+    const island = islandFor('#p2');
+    const value = valueOf(island);
+    backspace(island, value.length, value.length);
+    eq(valueOf(island), '', 'an existing paragraph has been emptied');
+    press('Delete');
+    press('Backspace');
+    ok(document.getElementById('p2').isConnected, 'and it is still there, by both keys');
+    QuickEditEditor.undo();
+    eq(valueOf(islandFor('#p2')), value, 'undo puts its words back');
   }
 
   heading('adding — the file still parses to what is on screen');
