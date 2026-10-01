@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.8.0';
+  var VERSION = '0.8.1';
   var REQUIRED = [
     'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
     'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
@@ -251,7 +251,8 @@
               ? ' Saving will then write straight back to it, rather than '
                 + 'downloading a copy.'
               : ''),
-      action: 'Choose ' + wanted,
+      file: wanted,
+      action: 'Choose this file',
       validate: function (file) {
         if (file.name.toLowerCase() !== wanted.toLowerCase()) {
           return 'That is ' + file.name + ', but this page is ' + wanted + '.';

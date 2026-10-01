@@ -36,6 +36,14 @@
     '}',
     '.title { font-weight: 600; margin-bottom: 5px; }',
     '.body { color: #b8bdc9; }',
+    // The filename lives here rather than on the button, where it has a whole
+    // line to itself and can wrap. A button cannot wrap, so a long name there
+    // ellipsised away the verb and left the thing reading "Choo…".
+    '.file {',
+    '  margin-top: 9px; font-weight: 600;',
+    '  overflow-wrap: anywhere; word-break: break-word;',
+    '}',
+    '.file:empty { display: none; }',
     '.error { color: #ff9f9f; margin-top: 8px; }',
     '.error:empty { display: none; }',
     '.row { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }',
@@ -43,13 +51,12 @@
     '  font: inherit; border: 0; border-radius: 7px; padding: 6px 13px;',
     '  cursor: pointer; background: rgba(255, 255, 255, .13); color: inherit;',
     '}',
-    // The primary button names the file, which can be longer than the card.
-    // Clip it rather than let it push the row off the side; the full name is
-    // on the button's title, and in the body text above it.
+    // Still clipped rather than allowed to push the row off the side, as a
+    // backstop for any caller that passes a long label — but the label is now
+    // a fixed phrase, so in practice there is nothing to clip.
     '.go {',
     '  flex: 1 1 auto; min-width: 0;',
     '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;',
-    '  text-align: left;',
     '}',
     '.cancel { flex: none; }',
     'button:hover { background: rgba(255, 255, 255, .22); }',
@@ -83,6 +90,7 @@
       '<div class="card">' +
         '<div class="title"></div>' +
         '<div class="body"></div>' +
+        '<div class="file"></div>' +
         '<div class="error"></div>' +
         '<div class="row">' +
           '<button class="go primary"></button>' +
@@ -93,9 +101,12 @@
 
     shadow.querySelector('.title').textContent = options.title;
     shadow.querySelector('.body').textContent = options.body;
+    shadow.querySelector('.file').textContent = options.file || '';
     var go = shadow.querySelector('.go');
     go.textContent = options.action;
-    go.title = options.action;
+    // The full name on hover as well, for a name long enough to wrap to three
+    // lines and for anyone reading it with a screen reader.
+    go.title = options.file ? options.action + ': ' + options.file : options.action;
 
     document.documentElement.appendChild(host);
     current = { host: host, shadow: shadow };
