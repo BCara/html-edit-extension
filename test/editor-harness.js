@@ -428,6 +428,25 @@ async function run() {
     QuickEditEditor.redo();
   }
 
+  heading('comments — who wrote them');
+  {
+    QuickEditEditor.setAuthor('Cara');
+    const region = QuickEditEditor.addCommentTo(document.getElementById('p4'));
+    writeComment(region, 'check this figure');
+    const out = QuickEditEditor.preview();
+    ok(/<!-- comment \[Cara \u00b7 \d{4}-\d{2}-\d{2}\]: check this figure -->/.test(out),
+       'a comment written with a name set carries the name and the day');
+
+    // The note that arrived unsigned, edited above while no name was set, is
+    // still somebody else's comment — having a name now must not sign it.
+    ok(out.indexOf('<!-- comment: rewritten note -->') !== -1,
+       'an existing unsigned note, edited, is not signed with the current name');
+
+    QuickEditEditor.setAuthor('');
+    ok(QuickEditEditor.status().author === '', 'and the name can be cleared again');
+    QuickEditEditor.removeComment(region);
+  }
+
   heading('comments — a note that would break out of a comment');
   {
     const region = QuickEditEditor.addCommentTo(document.getElementById('p1'));
@@ -725,6 +744,169 @@ async function run() {
     QuickEditEditor.redo();
     ok(tree.element.isConnected, 'redo put it back');
     QuickEditEditor.undo();       // leave the document as we found it
+  }
+
+  // Pressing a key on whatever has focus: the editor listens on the document,
+  // so this reaches it the same way a real key press would.
+  function press(key) {
+    return document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
+      key: key, bubbles: true, cancelable: true,
+    }));
+  }
+
+  heading('a freshly inserted thing goes away again on Esc or Delete');
+  {
+    caretTo(islandFor('#p3'), 0);
+    const before = QuickEditEditor.preview();
+
+    const table = QuickEditEditor.insertStructure('table');
+    ok(table.element.isConnected, 'a table was inserted');
+    ok(!press('Escape'), 'Esc was handled rather than left to the page');
+    ok(!table.element.isConnected, 'and the table is gone');
+    eq(QuickEditEditor.preview(), before, 'the file is untouched');
+
+    caretTo(islandFor('#p3'), 0);
+    const list = QuickEditEditor.insertStructure('bullets');
+    ok(list.element.isConnected, 'a list was inserted');
+    press('Backspace');
+    ok(!list.element.isConnected, 'Backspace removes it too');
+
+    caretTo(islandFor('#p3'), 0);
+    const para = QuickEditEditor.insertStructure('paragraph');
+    press('Delete');
+    ok(!para.element.isConnected, 'and so does Delete');
+    eq(QuickEditEditor.preview(), before, 'after all three, the file is still untouched');
+
+    // Undoing a removal is itself undoable, because it went through undo().
+    QuickEditEditor.redo();
+    ok(para.element.isConnected, 'a press made by mistake is recoverable with redo');
+    QuickEditEditor.undo();
+  }
+
+  heading('once something has been typed into it, the keys go back to normal');
+  {
+    caretTo(islandFor('#p3'), 0);
+    const tree = QuickEditEditor.insertStructure('quote');
+    typeInto(tree.cells[0].island, 'Mine now.');
+
+    ok(press('Escape'), 'Esc is left alone');
+    ok(tree.element.isConnected, 'and the quote stays, because it holds the user\'s words');
+
+    press('Backspace');
+    ok(tree.element.isConnected, 'Backspace stays an ordinary Backspace');
+
+    QuickEditEditor.undo();       // the typing
+    QuickEditEditor.undo();       // the insertion
+  }
+
+  heading('a thing that was already in the document is never removed this way');
+  {
+    // The case this must not get wrong: an empty cell in a table the user
+    // merely clicked into looks exactly like an empty cell in a new one.
+    caretTo(islandFor('#p3'), 0);
+    const tree = QuickEditEditor.insertStructure('table');
+    typeInto(islandFor('#p3'), '!');      // something else becomes the last thing done
+
+    caretTo(tree.cells[0].island, 0);
+    press('Delete');
+    ok(tree.element.isConnected, 'the table is left where it is');
+    press('Escape');
+    ok(tree.element.isConnected, 'by both keys');
+
+    QuickEditEditor.undo();       // the typing
+    QuickEditEditor.undo();       // the insertion
+  }
+
+  // --- AI rewrites, driven without a network --------------------------------
+
+  function selectAcross(startNode, startOffset, endNode, endOffset) {
+    const range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    const sel = document.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  heading('AI rewrite — the formatting stays exactly where it was');
+  {
+    // #p4 is "Another <span class="x">paragraph</span> with an inline span." —
+    // three runs of text with an element between them.
+    const islands = [...document.querySelectorAll('#p4 [data-qe-island]')];
+    const first = islands[0].firstChild, second = islands[1].firstChild;
+    selectAcross(first, 0, second, 1);        // crosses into the span: whole block
+
+    const scope = QuickEditEditor.selectionScope();
+    ok(!!scope, 'a selection across formatting has something to rewrite');
+    eq(scope.mode, 'block', 'and it is the whole block, not just the selected characters');
+    eq(scope.segments.length, islands.length, 'sent as one segment per run of text');
+
+    const before = QuickEditEditor.preview();
+    const rewritten = scope.segments.map((_, i) => 'R' + i + ' ');
+    const res = QuickEditEditor.applyRewrite(scope, rewritten, { label: 'Test', model: 'test-model' });
+    ok(res.ok, 'the rewrite is applied');
+
+    const after = QuickEditEditor.preview();
+    ok(after.indexOf('<span class="x">R1 </span>') !== -1,
+       'the inline span is exactly where it was, around its own rewritten words');
+    ok(after.indexOf('data-qe-island') === -1, 'no editing wrapper reached the file');
+    // Several runs changed, so there is no single diff to inspect. The
+    // invariant is simpler anyway: with the text between tags taken out, the
+    // two files are the same markup, character for character.
+    //
+    // Except <br>, and deliberately. A <br> in the FILE sits between runs, so
+    // the model never sees it and it cannot move. A <br> INSIDE a run is a line
+    // break someone typed this session — earlier tests typed two into #p4 —
+    // and that is part of the text being rewritten, shown as a return arrow in
+    // the preview. This fake answer contains none, so those two go, correctly.
+    const tagsOnly = (html) => html.replace(/>[^<]*</g, '><').replace(/<br>/g, '');
+    eq(tagsOnly(after), tagsOnly(before), 'every tag in the file is exactly as it was — only words changed');
+
+    const ai = QuickEditEditor.changes().filter((c) => c.ai);
+    ok(ai.length > 0 && ai[0].ai.label === 'Test', 'the list of changes says AI did it, and which rewrite');
+
+    QuickEditEditor.undo();
+    eq(QuickEditEditor.preview(), before, 'one undo takes the whole rewrite back, every run at once');
+    QuickEditEditor.redo();
+    eq(QuickEditEditor.preview(), after, 'and one redo puts it back');
+    QuickEditEditor.undo();
+  }
+
+  heading('AI rewrite — what it refuses');
+  {
+    const islands = [...document.querySelectorAll('#p4 [data-qe-island]')];
+    selectAcross(islands[0].firstChild, 0, islands[1].firstChild, 1);
+    const scope = QuickEditEditor.selectionScope();
+    const before = QuickEditEditor.preview();
+
+    const short = QuickEditEditor.applyRewrite(scope, ['only one'], { label: 'Test' });
+    ok(!short.ok, 'a rewrite with the wrong number of segments is refused');
+    eq(QuickEditEditor.preview(), before, 'and nothing was changed');
+
+    typeInto(islands[0], 'typed meanwhile ', 0);
+    const stale = QuickEditEditor.applyRewrite(scope, scope.segments.map(() => 'X'), { label: 'Test' });
+    ok(!stale.ok, 'a rewrite of text the user has since changed is refused, not applied over their typing');
+    QuickEditEditor.undo();
+  }
+
+  heading('AI rewrite — just the words selected');
+  {
+    const island = islandFor('#p5');
+    const value = valueOf(island);
+    const at = value.indexOf('carrying');
+    ok(at !== -1, 'the paragraph has the word to select');
+    selectAcross(island.firstChild, at, island.firstChild, at + 'carrying'.length);
+
+    const scope = QuickEditEditor.selectionScope();
+    eq(scope.mode, 'part', 'a selection inside one run rewrites only the selected words');
+    eq(scope.segments[0], 'carrying', 'and sends exactly those');
+
+    const res = QuickEditEditor.applyRewrite(scope, ['holding'], { label: 'Test' });
+    ok(res.ok, 'the rewrite is applied');
+    eq(valueOf(island), value.replace('carrying', 'holding'), 'and the rest of the run is untouched');
+    QuickEditEditor.undo();
+    eq(valueOf(island), value, 'undo restores it');
+    document.getSelection().removeAllRanges();
   }
 
   heading('adding — the file still parses to what is on screen');

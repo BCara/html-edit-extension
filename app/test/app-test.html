@@ -99,6 +99,19 @@ async function run() {
     ok(!out.includes('data-qe-island'), 'no editing wrapper reached the file');
   }
 
+  heading('your name and AI');
+  {
+    const status = await app.aiBridge.status();
+    eq(status.configured, false, 'with no key, AI reports itself as not set up');
+    let refused = null;
+    await app.aiBridge.rewrite({ segments: ['x'], instruction: 'y' }).catch((e) => { refused = e; });
+    ok(refused && /API key/.test(refused.message), 'and a rewrite says why, in words, without calling out');
+    await app.settings.set('author', 'Tester');
+    eq(await app.settings.get('author'), 'Tester', 'a name is remembered');
+    await app.settings.set('author', '');
+    ok(!!W.QuickEditAnthropicSDK && !!W.QuickEditAI, 'the SDK and the AI module are both loaded');
+  }
+
   heading('saving');
   {
     // No file handle in this environment, and no share sheet, so it must fall

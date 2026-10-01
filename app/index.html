@@ -24,6 +24,7 @@
   <div class="brand">Quick&nbsp;Edit</div>
   <div class="file" id="filename" hidden></div>
   <div class="spacer"></div>
+  <button id="settings-open" class="btn" title="Your name and AI">Settings</button>
   <button id="open" class="btn">Open</button>
   <button id="save" class="btn primary" hidden disabled>Save</button>
 </header>
@@ -73,8 +74,9 @@
     <dl class="how">
       <div>
         <dt>Nothing is uploaded</dt>
-        <dd>Your document is opened and edited in this browser tab. It is never
-            sent anywhere.</dd>
+        <dd>Your document is opened and edited in this browser tab. The only
+            exception is one you choose: an AI rewrite sends just the text you
+            select to Anthropic, using your own API key.</dd>
       </div>
       <div>
         <dt id="save-story-title">Saving</dt>
@@ -95,6 +97,37 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<dialog id="settings" class="settings" aria-labelledby="settings-title">
+  <form method="dialog" class="settings-body" id="settings-form">
+    <h2 id="settings-title">Your name and AI</h2>
+
+    <label for="set-author">Your name</label>
+    <input id="set-author" maxlength="60" autocomplete="name"
+           placeholder="So people can see who wrote what">
+    <p class="hint">Shown on your comments and in the list of changes. It is
+       whatever you type, not a sign-in, so anyone can use any name.</p>
+
+    <label for="set-key">Anthropic API key <span class="opt">optional</span></label>
+    <input id="set-key" type="password" autocomplete="off" spellcheck="false"
+           placeholder="sk-ant-…">
+    <label for="set-model">Model</label>
+    <select id="set-model"></select>
+    <p class="hint" id="set-model-note"></p>
+    <p class="hint" id="set-status"></p>
+    <p class="hint">With a key you can select text and ask for a rewrite. Only the
+       text you select is sent, to Anthropic, using your key and billed to your
+       Anthropic account. The key is kept in this browser on this device. Get one
+       at console.anthropic.com.</p>
+
+    <div class="settings-actions">
+      <button type="button" class="btn" id="set-forget" hidden>Forget key</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="set-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="set-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- The engine and the editor, exactly as the extension loads them. -->
 <script src="../packages/html-splice/src/tokenizer.js"></script>
 <script src="../packages/html-splice/src/splice.js"></script>
@@ -103,6 +136,8 @@
 <script src="../src/lib/islands.js"></script>
 <script src="../src/lib/blocks.js"></script>
 <script src="../src/lib/structures.js"></script>
+<script src="../src/vendor/anthropic-sdk.js"></script>
+<script src="../src/lib/ai.js"></script>
 <script src="../src/lib/comments.js"></script>
 <script src="../src/lib/prompt.js"></script>
 <script src="../src/editor.js"></script>

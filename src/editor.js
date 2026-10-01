@@ -36,6 +36,10 @@
   var Blocks = root.QuickEditBlocks;
   var Comments = root.QuickEditComments;
   var Structures = root.QuickEditStructures;
+  // Optional: present when the host loaded it. Only its presets and its word
+  // diff are used in the page; the request itself is made by the host, which is
+  // where the user's API key lives.
+  function AI() { return root.QuickEditAI || null; }
 
   var UI_ATTR = 'data-quick-edit-ui';
   var MODE_ATTR = 'data-qe-mode';
@@ -104,6 +108,12 @@
     active: false,
     doc: null,            // the document being edited; null means this one
     win: null,
+    settings: null,       // host storage: { get(key), set(key, value) }
+    ai: null,             // host AI: { status(), rewrite(req), settingsHint }
+    author: '',           // the name the user typed, self-declared
+    assist: null,         // the layer holding the AI chip, AI card, changes list
+    aiJob: null,          // the rewrite in progress, if any
+    nudgedName: false,    // suggested adding a name once already
     source: '',
     map: null,
     filename: 'page.html',
@@ -209,6 +219,30 @@
     // so they get the compact treatment and sit together behind a divider.
     'button.icon { padding: 4px 8px; font-size: 14px; line-height: 1; }',
     '.sep { width: 1px; align-self: stretch; margin: 2px 1px; background: rgba(255, 255, 255, .16); flex: none; }',
+    // The count reads as text but opens the list of changes.
+    'button.count { background: transparent; padding: 4px 6px; color: #a5aab8; }',
+    'button.count:hover:not(:disabled) { background: rgba(255, 255, 255, .1); color: #f1f2f5; }',
+    '.panel[hidden] { display: none; }',
+    '.panel {',
+    '  position: absolute; bottom: calc(100% + 8px); right: 0;',
+    '  width: 290px; max-width: calc(100vw - 32px); box-sizing: border-box;',
+    '  padding: 12px; display: flex; flex-direction: column; gap: 7px;',
+    '  border-radius: 12px; background: rgba(22, 22, 27, .97);',
+    '  box-shadow: 0 4px 22px rgba(0, 0, 0, .42);',
+    '}',
+    '.p-label { font-weight: 600; }',
+    '.p-row { display: flex; gap: 6px; }',
+    '.p-input {',
+    '  font: inherit; flex: 1 1 auto; min-width: 0; box-sizing: border-box;',
+    '  padding: 6px 9px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, .2);',
+    '  background: rgba(255, 255, 255, .07); color: inherit;',
+    '}',
+    '.p-input:focus { outline: 2px solid #7c74ff; outline-offset: 0; }',
+    '.p-hint { color: #9aa0ad; font-size: 11px; line-height: 1.45; }',
+    '.p-sep { height: 1px; background: rgba(255, 255, 255, .12); margin: 2px 0; }',
+    '.p-changes { text-align: left; border-radius: 7px; }',
+    '.p-ai { display: flex; flex-direction: column; gap: 5px; }',
+    '.p-ai .ok { color: #9fe0b5; }',
     // The insert menu opens upward: the bar is pinned to the bottom right, so
     // there is never room below it and always room above.
     '.menu[hidden] { display: none; }',
@@ -609,6 +643,8 @@
 
     state.lastTouch = now;
     region.current = after;
+    region.by = authorName();
+    if (region.ai) region.ai.edited = true;
     markChanged(region);
     refresh();
   }
@@ -653,6 +689,7 @@
     if (state.historyAt === 0) { flash('Nothing to undo'); return; }
     var entry = state.history[--state.historyAt];
     if (entry.kind === 'add') setAdded(entry.region, false);
+    else if (entry.kind === 'multi') applyMulti(entry, false);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, true);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, false);
     else if (entry.kind === 'comment-text') setCommentText(entry.region, entry.before);
@@ -664,6 +701,7 @@
     if (state.historyAt >= state.history.length) { flash('Nothing to redo'); return; }
     var entry = state.history[state.historyAt++];
     if (entry.kind === 'add') setAdded(entry.region, true);
+    else if (entry.kind === 'multi') applyMulti(entry, true);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, false);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, true);
     else if (entry.kind === 'comment-text') setCommentText(entry.region, entry.after);
@@ -787,16 +825,66 @@
     if (state.active) e.preventDefault();
   }
 
+  /*
+   * Something just inserted that has had nothing typed into it yet.
+   *
+   * Inserting is a guess about what the user wanted, and the guess is wrong
+   * often enough that backing out of it has to be as cheap as making it. So
+   * while a new thing is still empty, Esc and the delete keys mean "not that"
+   * rather than "edit nothing". Once a single character is in it the keys go
+   * back to their ordinary jobs, because by then it is the user's content.
+   *
+   * Only the newest insertion qualifies, and only while it is still the last
+   * thing that happened: anything else and this would delete a table the user
+   * had merely clicked into.
+   */
+  function pendingInsert() {
+    var entry = state.history[state.historyAt - 1];
+    if (!entry || entry.kind !== 'add' || entry.region.removed) return null;
+
+    var region = entry.region;
+    var empty = region.kind === 'tree' ? !treeHasText(region) : !region.current;
+    if (!empty) return null;
+
+    var island = islandOf(doc().activeElement);
+    var here = island && state.byIsland.get(island);
+    if (!here) return null;
+    return (here === region || here.tree === region) ? region : null;
+  }
+
+  function insertName(region) {
+    if (region.kind !== 'tree') return 'new block';
+    var what = Structures.kindById(region.id);
+    return what ? what.label.toLowerCase() : 'new block';
+  }
+
   function onKeyDown(e) {
     if (!state.active) return;
 
     // Esc closes the insert menu, and is checked before the modifier gate
     // below because it carries no modifier.
-    if (e.key === 'Escape' && (isMenuOpen() || isAddMenuOpen())) {
+    if (e.key === 'Escape' &&
+        (isMenuOpen() || isAddMenuOpen() || isMoreOpen() || isAIOpen() || isChangesOpen())) {
       e.preventDefault();
       setMenuOpen(false);
+      setMoreOpen(false);
       if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
+      // Innermost first: the AI card is the thing being worked in.
+      if (isAIOpen()) closeAI();
+      else closeChanges();
       return;
+    }
+
+    // Undo rather than a bare removal, so a mistaken press is itself undoable
+    // and the region's bookkeeping unwinds the one way it knows how.
+    if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'Delete') {
+      var fresh = pendingInsert();
+      if (fresh) {
+        e.preventDefault();
+        undo();
+        flash('Removed the ' + insertName(fresh));
+        return;
+      }
     }
 
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -869,10 +957,10 @@
     'button.note { background: #d9a01e; }',
     // Subordinate on purpose: adding another of what is already there is the
     // common case and stays one click on the + . This is the way to the rest.
-    'button.more {',
-    '  background: #6b7280; width: 18px; height: 18px; font-size: 10px;',
-    '  align-self: center;',
-    '}',
+    // It says that in grey rather than by being smaller: an odd-sized circle
+    // sat off the row's centre line and left the amber note button bulging
+    // out beside it, which read as a stray yellow smudge rather than a button.
+    'button.more { background: #6b7280; }',
     '.menu[hidden] { display: none; }',
     '.menu {',
     '  position: absolute; left: 100%; top: 0; margin-left: 7px;',
@@ -909,7 +997,11 @@
     shadow.innerHTML = '<style>' + ADD_CSS + '</style>' +
       '<div class="row">' +
         '<button class="block" title="Add another one of these">+</button>' +
-        '<button class="more" title="Insert something else here">\u25be</button>' +
+        '<button class="more" title="Insert something else here">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+          '<path d="M3 5.5h10L8 11z"/>' +
+          '</svg>' +
+        '</button>' +
         '<button class="note" title="Comment on this section">' +
           '<svg viewBox="0 0 16 16" aria-hidden="true">' +
           '<path d="M3 2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7l-3.6 2.8V12H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>' +
@@ -1096,7 +1188,11 @@
     // The bar's and the hover controls' own handlers stopPropagation, so
     // reaching here means the click was somewhere else.
     if (isMenuOpen()) setMenuOpen(false);
+    if (isMoreOpen()) setMoreOpen(false);
     if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
+    // A card still waiting for a choice goes; one with a result or a request
+    // in flight stays, because losing either to a stray click is worse.
+    if (state.aiJob && (state.aiJob.status === 'choose' || state.aiJob.status === 'error')) closeAI();
   }
 
   function onMouseOver(e) {
@@ -1133,6 +1229,8 @@
     ['focusin', onFocusIn, true],
     ['mouseover', onMouseOver, true],
     ['mousedown', onMouseDownAnywhere, false],
+    ['selectionchange', onSelectionChange, false],
+    ['scroll', onScrollAssist, true],
     ['click', onClick, true],
     ['submit', onSubmit, true],
   ];
@@ -1231,14 +1329,17 @@
     var paired = state.map.comments.paired;
 
     for (var i = 0; i < paired.length; i++) {
-      var text = Comments.textOf(paired[i].node.data);
-      if (text === null) continue;
+      var parsed = Comments.parse(paired[i].node.data);
+      if (parsed === null) continue;
+      var text = parsed.text;
       var node = paired[i].node;
       state.comments.push({
         kind: 'comment',
         token: paired[i].token,
         node: node,
         block: node.nextElementSibling || node.parentElement,
+        author: parsed.author,
+        date: parsed.date,
         text: text,
         original: text,
         saved: text,
@@ -1257,11 +1358,17 @@
       flash('Quick Edit cannot tell where this section starts in the file');
       return null;
     }
+    if (!authorName() && !state.nudgedName) {
+      state.nudgedName = true;
+      flash('Tip: add your name from ⋯ so people can see who wrote this');
+    }
     var region = {
       kind: 'comment',
       token: null,
       node: null,
       block: block,
+      author: authorName(),
+      date: Comments.today(),
       text: '',
       original: '',
       saved: '',
@@ -1411,10 +1518,16 @@
       var card = doc().createElement('div');
       card.className = 'card' + (region.text.trim() === region.saved ? '' : ' unsaved');
       card.innerHTML =
-        '<div class="head"><span class="who">Comment</span>' +
+        '<div class="head"><span class="who"></span>' +
         '<button class="del" title="Delete this comment">&times;</button></div>' +
         '<textarea rows="1" placeholder="Write a comment…"></textarea>';
 
+      // Whoever the note says wrote it; a new one is the current user's until
+      // it is saved.
+      var who = region.token ? region.author : (region.author || authorName());
+      card.querySelector('.who').textContent = who
+        ? who + (region.date ? ' · ' + region.date : '')
+        : 'Comment';
       var textarea = card.querySelector('textarea');
       textarea.value = region.text;
 
@@ -1518,7 +1631,7 @@
       '<div class="bar">' +
         '<span class="dot"></span>' +
         '<span class="label">Edit mode</span>' +
-        '<span class="count"></span>' +
+        '<button class="count" title="Show what has changed"></button>' +
         '<span class="msg"></span>' +
         '<span class="sep"></span>' +
         '<button class="insert" title="Add a table, a list, a heading">Insert \u25be</button>' +
@@ -1533,6 +1646,21 @@
         '<button class="undo icon" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo" disabled>\u21b6</button>' +
         '<button class="redo icon" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo" disabled>\u21b7</button>' +
         '<span class="sep"></span>' +
+        '<button class="more-btn icon" title="Your name, changes and AI" aria-label="More">⋯</button>' +
+        '<div class="panel" hidden>' +
+          '<label class="p-label" for="qe-author">Your name</label>' +
+          '<div class="p-row">' +
+            '<input id="qe-author" class="p-input" maxlength="60" autocomplete="name" ' +
+                   'placeholder="So people can see who wrote what">' +
+            '<button class="p-save">Save</button>' +
+          '</div>' +
+          '<div class="p-hint">Shown on your comments and in the list of changes. ' +
+            'It is whatever you type here, not a sign-in, so anyone can use any name.</div>' +
+          '<div class="p-sep"></div>' +
+          '<button class="p-changes">Show changes</button>' +
+          '<div class="p-sep"></div>' +
+          '<div class="p-ai"></div>' +
+        '</div>' +
         '<button class="save primary" disabled>Save</button>' +
         '<button class="done">Done</button>' +
       '</div>';
@@ -1549,6 +1677,12 @@
       redo: shadow.querySelector('.redo'),
       save: shadow.querySelector('.save'),
       done: shadow.querySelector('.done'),
+      moreBtn: shadow.querySelector('.more-btn'),
+      panel: shadow.querySelector('.panel'),
+      authorInput: shadow.querySelector('.p-input'),
+      authorSave: shadow.querySelector('.p-save'),
+      changesBtn: shadow.querySelector('.p-changes'),
+      moreAI: shadow.querySelector('.p-ai'),
     };
     // mousedown, not click: by click time the caret has already left the text
     // the user was editing, and undo would restore it somewhere they cannot see.
@@ -1576,6 +1710,33 @@
     ui.redo.addEventListener('mousedown', function (e) { e.preventDefault(); redo(); });
     ui.save.addEventListener('click', function () { save(); });
     ui.done.addEventListener('click', function () { setActive(false); });
+
+    ui.count.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleChanges();
+    });
+    ui.moreBtn.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      setMoreOpen(ui.panel.hidden);
+    });
+    // The panel holds a text field, so it must take focus and keep it: stop
+    // the page's mousedown handler from treating a click in here as "away".
+    ui.panel.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    ui.authorSave.addEventListener('click', function () {
+      setAuthor(ui.authorInput.value);
+      flash(state.author ? 'Hello, ' + state.author : 'Name cleared');
+      setMoreOpen(false);
+    });
+    ui.authorInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); ui.authorSave.click(); }
+      e.stopPropagation();       // typing a name is not an editing shortcut
+    });
+    ui.changesBtn.addEventListener('click', function () {
+      setMoreOpen(false);
+      openChanges();
+    });
     state.ui = ui;
   }
 
@@ -1611,9 +1772,12 @@
     var unsaved = unsavedCount();
     var empty = emptyAddedCount() + emptyCommentCount();
 
+    // Counted the way the list of changes counts them — per paragraph, not per
+    // run of text — so the number on the bar and the number in the list agree.
+    var shown = collectChanges().length || changed;
     var text = changed === 0
       ? 'no changes'
-      : changed + (changed === 1 ? ' change' : ' changes') + (unsaved ? ' · unsaved' : ' · saved');
+      : shown + (shown === 1 ? ' change' : ' changes') + (unsaved ? ' · unsaved' : ' · saved');
     if (empty) text += ' · ' + empty + ' empty' + (empty === 1 ? '' : 's') + ' not saved';
 
     state.ui.count.textContent = text;
@@ -1629,6 +1793,7 @@
       state.ui.save.textContent = 'Save';
       state.ui.save.title = '';
     }
+    renderChanges();       // only does anything while the list is open
   }
 
   function flash(message) {
@@ -1638,6 +1803,741 @@
     state.flashTimer = setTimeout(function () {
       if (state.ui) state.ui.msg.textContent = '';
     }, 3000);
+  }
+
+  // --- who you are, what changed, and AI rewrites ---------------------------
+
+  /*
+   * The user's name, as they typed it. Self-declared: it records who says they
+   * wrote something, which is what a team that trusts each other needs, and it
+   * is presented as exactly that everywhere it appears.
+   */
+  function authorName() { return state.author || ''; }
+  function displayName(name) { return name || 'You'; }
+
+  function setAuthor(name) {
+    state.author = Comments.cleanName(name);
+    if (state.settings) {
+      Promise.resolve(state.settings.set('author', state.author)).catch(function () {});
+    }
+    renderMore();
+    renderRail();
+    renderChanges();
+    return state.author;
+  }
+
+  function setMoreOpen(open) {
+    if (!state.ui) return;
+    state.ui.panel.hidden = !open;
+    if (open) {
+      setMenuOpen(false);
+      renderMore();
+      state.ui.authorInput.value = authorName();
+    }
+  }
+
+  function isMoreOpen() { return !!(state.ui && !state.ui.panel.hidden); }
+
+  function renderMore() {
+    if (!state.ui) return;
+    var n = collectChanges().length;
+    state.ui.changesBtn.textContent = n
+      ? 'Show changes (' + n + ')' : 'Show changes (none yet)';
+
+    var box = state.ui.moreAI;
+    box.textContent = '';
+    var title = doc().createElement('div');
+    title.className = 'p-label';
+    title.textContent = 'AI rewrites';
+    box.appendChild(title);
+    var line = doc().createElement('div');
+    line.className = 'p-hint';
+    box.appendChild(line);
+
+    if (!state.ai) {
+      line.textContent = 'Not available here.';
+      return;
+    }
+    line.textContent = 'Checking…';
+    Promise.resolve(state.ai.status()).then(function (st) {
+      if (st && st.configured) {
+        line.innerHTML = '';
+        var ok = doc().createElement('span');
+        ok.className = 'ok';
+        ok.textContent = 'Ready, using ' + (st.modelLabel || 'Claude') + '. ';
+        line.appendChild(ok);
+        line.appendChild(doc().createTextNode(
+          'Select some text, then press ✨ AI. Only that text is sent, to Anthropic, with your key.'));
+      } else {
+        line.textContent = 'Needs your own Anthropic API key. ' + (state.ai.settingsHint || '');
+      }
+    }).catch(function () { line.textContent = 'Could not check the AI settings.'; });
+  }
+
+  // --- the list of changes ----------------------------------------------------
+
+  var TAG_NAMES = {
+    p: 'paragraph', li: 'list item', blockquote: 'quote', td: 'cell', th: 'heading cell',
+    h1: 'heading', h2: 'heading', h3: 'heading', h4: 'heading', h5: 'heading', h6: 'heading',
+  };
+
+  function describeTag(tag) { return TAG_NAMES[tag] || tag; }
+
+  /*
+   * Everything that differs from the file as it was opened, in document order,
+   * with who did it and whether AI suggested it. Session-level: this is what
+   * Save would write, described, not a history kept in the file.
+   */
+  function collectChanges() {
+    var list = [];
+    var i, r;
+
+    // Edits are grouped by block. A paragraph with bold in it is several runs
+    // of text, and one rewrite of it is one change to one paragraph — not one
+    // row per fragment, which reads as several unrelated edits.
+    var byBlock = new Map();
+    for (i = 0; i < state.regions.length; i++) {
+      r = state.regions[i];
+      if (r.kind === 'text' && r.current !== r.original) {
+        var block = Blocks.blockFor(r.island) || r.island;
+        var group = byBlock.get(block);
+        if (!group) {
+          group = { kind: 'edit', block: block, by: r.by, ai: r.ai, target: block };
+          byBlock.set(block, group);
+          list.push(group);
+        }
+        if (r.by) group.by = r.by;
+        if (r.ai && !group.ai) group.ai = r.ai;
+        if (r.ai && r.ai.edited) group.ai = r.ai;
+        if (!r.ai && group.ai) group.mixed = true;      // some of it typed by hand
+      } else if (r.kind === 'insert' && !r.removed && r.current) {
+        list.push({ kind: 'added', what: describeTag(r.template.tag), after: r.current,
+                    by: r.by, ai: r.ai, target: r.element });
+      }
+    }
+    // Each group's before and after is the whole block's text, unchanged runs
+    // included, so the diff shows the edit in the sentence it belongs to.
+    byBlock.forEach(function (group, block) {
+      var runs = [];
+      var islands = block.querySelectorAll ? block.querySelectorAll('[' + Islands.ATTR + ']') : [];
+      for (var k = 0; k < islands.length; k++) {
+        var reg = regionOf(islands[k]);
+        if (reg && reg.kind === 'text') runs.push(reg);
+      }
+      if (!runs.length) runs = state.regions.filter(function (x) { return x.island === block; });
+      group.before = runs.map(function (x) { return x.original; }).join('');
+      group.after = runs.map(function (x) { return x.current; }).join('');
+    });
+
+    for (i = 0; i < state.trees.length; i++) {
+      var t = state.trees[i];
+      if (t.removed || !treeHasText(t)) continue;
+      var typed = t.cells.filter(function (c) { return c.current; });
+      list.push({ kind: 'added', what: Structures.kindById(t.id).label.toLowerCase(),
+                  after: typed.map(function (c) { return c.current; }).join(' · '),
+                  by: typed[0] && typed[0].by, ai: typed.some(function (c) { return c.ai; }) && typed[0].ai,
+                  target: t.element });
+    }
+    for (i = 0; i < state.comments.length; i++) {
+      var c = state.comments[i];
+      var text = c.text.trim();
+      var target = c.block;
+      if (c.removed) {
+        if (c.token) list.push({ kind: 'comment-del', before: c.original, by: c.author, target: target });
+      } else if (!c.token && text) {
+        list.push({ kind: 'comment-add', after: text, by: c.author || authorName(), target: target });
+      } else if (c.token && text !== c.original) {
+        list.push({ kind: 'comment-edit', before: c.original, after: text, by: c.author, target: target });
+      }
+    }
+
+    list.sort(function (a, b) {
+      if (!a.target || !b.target || a.target === b.target) return 0;
+      return a.target.compareDocumentPosition(b.target) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
+    return list;
+  }
+
+  function changeHeading(ch) {
+    var who = displayName(ch.by);
+    if (ch.kind === 'edit') {
+      if (!ch.ai) return who + ' · edited';
+      return who + ' · accepted an AI rewrite (' + ch.ai.label + ')' +
+             (ch.ai.edited || ch.mixed ? ', then edited it' : '');
+    }
+    if (ch.kind === 'added') return who + ' · added a ' + ch.what + (ch.ai ? ', with AI' : '');
+    if (ch.kind === 'comment-add') return who + ' · added a comment';
+    if (ch.kind === 'comment-edit') return 'Comment edited' + (ch.by ? ' (' + ch.by + '’s)' : '');
+    return 'Comment deleted' + (ch.by ? ' (' + ch.by + '’s)' : '');
+  }
+
+  // For display only: a <br> in an island's value reads as a return arrow.
+  function visible(value) { return String(value || '').split(Islands.BR).join(' ↵ '); }
+
+  // Before/after as marked-up words, built from DOM nodes so that neither the
+  // document's text nor Claude's can inject anything.
+  function diffInto(box, before, after) {
+    var ai = AI();
+    var parts = ai ? ai.diffWords(visible(before), visible(after))
+      : [{ op: 'del', text: visible(before) }, { op: 'add', text: visible(after) }];
+    parts.forEach(function (part) {
+      var node = doc().createElement(part.op === 'same' ? 'span' : part.op === 'del' ? 'del' : 'ins');
+      node.textContent = part.text;
+      box.appendChild(node);
+    });
+  }
+
+  function openChanges() {
+    ensureAssist().changes.hidden = false;
+    renderChanges();
+  }
+  function closeChanges() { if (state.assist) state.assist.changes.hidden = true; }
+  function toggleChanges() {
+    if (state.assist && !state.assist.changes.hidden) closeChanges();
+    else openChanges();
+  }
+  function isChangesOpen() { return !!(state.assist && !state.assist.changes.hidden); }
+
+  function renderChanges() {
+    if (!state.assist || state.assist.changes.hidden) return;
+    var box = state.assist.changes;
+    var list = collectChanges();
+    box.textContent = '';
+
+    var head = doc().createElement('div');
+    head.className = 'c-head';
+    var title = doc().createElement('strong');
+    title.textContent = list.length ? 'Changes (' + list.length + ')' : 'No changes yet';
+    var close = doc().createElement('button');
+    close.className = 'x';
+    close.title = 'Close';
+    close.textContent = '×';
+    close.addEventListener('click', closeChanges);
+    head.appendChild(title);
+    head.appendChild(close);
+    box.appendChild(head);
+
+    var note = doc().createElement('div');
+    note.className = 'c-note';
+    note.textContent = 'What Save would write. Names are whatever each person typed in, not verified.';
+    box.appendChild(note);
+
+    var ol = doc().createElement('ol');
+    ol.className = 'c-list';
+    list.forEach(function (ch) {
+      var li = doc().createElement('li');
+      var btn = doc().createElement('button');
+      btn.className = 'c-row' + (ch.ai ? ' is-ai' : '');
+      var who = doc().createElement('span');
+      who.className = 'c-who';
+      who.textContent = changeHeading(ch);
+      var what = doc().createElement('span');
+      what.className = 'c-diff';
+      if (ch.kind === 'edit' || ch.kind === 'comment-edit') diffInto(what, ch.before, ch.after);
+      else if (ch.kind === 'comment-del') { var d = doc().createElement('del'); d.textContent = visible(ch.before); what.appendChild(d); }
+      else what.textContent = visible(ch.after);
+      btn.appendChild(who);
+      btn.appendChild(what);
+      btn.addEventListener('click', function () {
+        if (!ch.target || !ch.target.isConnected) return;
+        ch.target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        ch.target.setAttribute(ACTIVE_ATTR, '');
+        setTimeout(function () { ch.target.removeAttribute(ACTIVE_ATTR); }, 1400);
+      });
+      li.appendChild(btn);
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+  }
+
+  // --- AI rewrites ----------------------------------------------------------------
+
+  /*
+   * What a selection would rewrite, or null.
+   *
+   * Two shapes. Words inside one run of text are rewritten on their own, with
+   * the rest of the run sent as context. Anything else — a selection crossing
+   * into bold, or a whole paragraph — becomes the whole block, sent as its runs
+   * so the formatting between them survives: see QuickEditAI.
+   */
+  function selectionScope() {
+    var sel = doc().getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    var range = sel.getRangeAt(0);
+    var startIsland = islandOf(range.startContainer);
+    var endIsland = islandOf(range.endContainer);
+    if (!startIsland) return null;
+    var startRegion = regionOf(startIsland);
+    if (!startRegion || startRegion.removed) return null;
+    var rect = range.getBoundingClientRect();
+
+    if (startIsland === endIsland) {
+      var value = startRegion.current;
+      var a = Islands.indexAt(startIsland, range.startContainer, range.startOffset);
+      var b = Islands.indexAt(startIsland, range.endContainer, range.endOffset);
+      if (a !== null && b !== null && b > a && (b - a) < value.length && value.slice(a, b).trim()) {
+        return {
+          mode: 'part', regions: [startRegion], snapshot: [value], start: a, end: b,
+          segments: [value.slice(a, b)], before: value.slice(0, a), after: value.slice(b),
+          rect: rect,
+        };
+      }
+    }
+
+    var block = Blocks.blockFor(startIsland);
+    if (!block) return null;
+    var regions = [];
+    var islands = block.querySelectorAll('[' + Islands.ATTR + ']');
+    for (var i = 0; i < islands.length; i++) {
+      var r = regionOf(islands[i]);
+      if (r && !r.removed) regions.push(r);
+    }
+    var segments = regions.map(function (r2) { return r2.current; });
+    if (!segments.join('').trim()) return null;
+    return {
+      mode: 'block', regions: regions, snapshot: segments.slice(), segments: segments,
+      before: neighbourText(block, 'previousElementSibling'),
+      after: neighbourText(block, 'nextElementSibling'),
+      rect: rect, block: block,
+    };
+  }
+
+  function neighbourText(block, direction) {
+    var n = block[direction];
+    while (n && n.hasAttribute && n.hasAttribute(UI_ATTR)) n = n[direction];
+    return n ? (n.textContent || '').replace(/\s+/g, ' ').trim() : '';
+  }
+
+  // Island values carry U+0001 for a <br>; the model sees an ordinary newline.
+  function toModelText(value) { return value.split(Islands.BR).join('\n'); }
+
+  /*
+   * And back. A newline becomes a <br> only where the original run already had
+   * one — otherwise a rewrite could introduce line breaks, which is markup the
+   * user did not ask for. Control characters, U+0001 included, never survive.
+   */
+  function fromModelText(text, original) {
+    var clean = sanitiseText(text);
+    if (original.indexOf(Islands.BR) !== -1) return clean.split('\n').join(Islands.BR);
+    return clean.replace(/\s*\n\s*/g, ' ');
+  }
+
+  function applyValue(region, value) {
+    Islands.writeValue(region.island, value);
+    region.current = value;
+    markChanged(region);
+  }
+
+  /*
+   * Put a rewrite into the document as one undoable step.
+   *
+   * Refuses if the text moved underneath: a rewrite of words the user has since
+   * changed would quietly throw their typing away.
+   */
+  function applyRewrite(scope, segments, meta) {
+    for (var i = 0; i < scope.regions.length; i++) {
+      if (scope.regions[i].current !== scope.snapshot[i] || scope.regions[i].removed) {
+        return { ok: false, message: 'The text changed after the rewrite was asked for. Nothing was changed; try again.' };
+      }
+    }
+    if (segments.length !== scope.segments.length) {
+      return { ok: false, message: 'The rewrite did not line up with the text. Nothing was changed.' };
+    }
+
+    var entries = [];
+    if (scope.mode === 'part') {
+      var r = scope.regions[0];
+      var next = r.current.slice(0, scope.start) + fromModelText(segments[0], scope.segments[0]) +
+                 r.current.slice(scope.end);
+      if (next !== r.current) entries.push({ region: r, before: r.current, after: next });
+    } else {
+      for (var j = 0; j < scope.regions.length; j++) {
+        var value = fromModelText(segments[j], scope.segments[j]);
+        if (value !== scope.regions[j].current) {
+          entries.push({ region: scope.regions[j], before: scope.regions[j].current, after: value });
+        }
+      }
+    }
+    if (!entries.length) return { ok: false, message: 'The rewrite came back unchanged.' };
+
+    entries.forEach(function (e) {
+      var ai = { label: meta.label, model: meta.model || '', edited: false };
+      e.prevAI = e.region.ai;
+      e.prevBy = e.region.by;
+      e.nextAI = ai;
+      e.nextBy = authorName();
+      applyValue(e.region, e.after);
+      e.region.ai = ai;
+      e.region.by = e.nextBy;
+    });
+    pushHistory({ kind: 'multi', entries: entries });
+    refresh();
+    positionCards();
+    renderChanges();
+    return { ok: true, changed: entries.length };
+  }
+
+  function applyMulti(entry, forward) {
+    entry.entries.forEach(function (e) {
+      applyValue(e.region, forward ? e.after : e.before);
+      // A redo puts back the rewrite as it was accepted, not as later typing
+      // left it — that typing was undone to get here.
+      e.region.ai = forward
+        ? (e.nextAI && { label: e.nextAI.label, model: e.nextAI.model, edited: false })
+        : e.prevAI;
+      e.region.by = forward ? e.nextBy : e.prevBy;
+    });
+    state.lastTouch = 0;
+    refresh();
+    positionCards();
+    renderChanges();
+  }
+
+  var ASSIST_CSS = [
+    ':host { all: initial; }',
+    '.layer { position: fixed; inset: 0; pointer-events: none;',
+    '  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f1f2f5; }',
+    '[hidden] { display: none !important; }',
+    'button { font: inherit; color: inherit; cursor: pointer; border: 0; }',
+    '.chip {',
+    '  position: absolute; pointer-events: auto; padding: 5px 11px; border-radius: 999px;',
+    '  background: #5b52f0; color: #fff; font-weight: 600; font-size: 12px;',
+    '  box-shadow: 0 0 0 2px #fff, 0 2px 10px rgba(0, 0, 0, .3);',
+    '}',
+    '.chip:hover { background: #6d64ff; }',
+    '.card, .changes {',
+    '  position: absolute; pointer-events: auto; box-sizing: border-box;',
+    '  border-radius: 12px; background: rgba(22, 22, 27, .97);',
+    '  box-shadow: 0 6px 28px rgba(0, 0, 0, .45);',
+    '}',
+    '.card { width: 360px; max-width: calc(100vw - 24px); padding: 12px 13px;',
+    '  display: flex; flex-direction: column; gap: 9px; }',
+    '.a-head, .c-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }',
+    '.a-title { font-weight: 600; }',
+    '.x { background: transparent; font-size: 17px; line-height: 1; padding: 2px 6px;',
+    '  border-radius: 6px; color: #9aa0ad; }',
+    '.x:hover { background: rgba(255, 255, 255, .12); color: #fff; }',
+    '.a-scope, .a-meta, .c-note { color: #9aa0ad; font-size: 11.5px; }',
+    '.a-presets { display: flex; flex-wrap: wrap; gap: 6px; }',
+    '.a-preset, .a-btn { padding: 6px 11px; border-radius: 8px;',
+    '  background: rgba(255, 255, 255, .12); }',
+    '.a-preset:hover, .a-btn:hover { background: rgba(255, 255, 255, .22); }',
+    '.a-btn.primary { background: #5b52f0; }',
+    '.a-btn.primary:hover { background: #6d64ff; }',
+    '.a-custom { display: flex; gap: 6px; }',
+    '.a-input { font: inherit; flex: 1 1 auto; min-width: 0; box-sizing: border-box;',
+    '  padding: 7px 9px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .2);',
+    '  background: rgba(255, 255, 255, .07); color: inherit; }',
+    '.a-input:focus { outline: 2px solid #7c74ff; outline-offset: 0; }',
+    '.a-diff { background: rgba(255, 255, 255, .06); border-radius: 8px; padding: 9px 10px;',
+    '  max-height: 40vh; overflow: auto; line-height: 1.55; white-space: pre-wrap; }',
+    'del { color: #ff9f9f; text-decoration: line-through; text-decoration-color: rgba(255,159,159,.7); }',
+    // A removed word running straight into its replacement reads as one word.
+    'del + ins, ins + del { margin-left: .3em; }',
+    'ins { color: #9fe0b5; text-decoration: none; background: rgba(159, 224, 181, .12); border-radius: 3px; }',
+    '.a-row { display: flex; gap: 6px; flex-wrap: wrap; }',
+    '.a-error { color: #ffc4a8; }',
+    '.changes { right: 16px; bottom: 70px; width: 380px; max-width: calc(100vw - 32px);',
+    '  max-height: 62vh; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }',
+    '.c-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }',
+    '.c-row { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 3px;',
+    '  padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, .06);',
+    '  border-left: 3px solid rgba(255, 255, 255, .25); }',
+    '.c-row.is-ai { border-left-color: #8f88ff; }',
+    '.c-row:hover { background: rgba(255, 255, 255, .12); }',
+    '.c-who { font-weight: 600; font-size: 12px; }',
+    '.c-diff { color: #d6d9e0; font-size: 12px; overflow-wrap: anywhere; }',
+  ].join('\n');
+
+  function ensureAssist() {
+    if (state.assist && state.assist.host.isConnected) return state.assist;
+
+    var host = doc().createElement('div');
+    host.setAttribute(UI_ATTR, '');
+    [['position', 'fixed'], ['left', '0'], ['top', '0'], ['width', '100%'], ['height', '100%'],
+     ['z-index', '2147483646'], ['margin', '0'], ['padding', '0'], ['border', '0'],
+     ['pointer-events', 'none'], ['display', 'block'], ['transform', 'none'],
+     ['opacity', '1'], ['visibility', 'visible'],
+    ].forEach(function (p) { host.style.setProperty(p[0], p[1], 'important'); });
+
+    var shadow = host.attachShadow({ mode: 'closed' });
+    shadow.innerHTML = '<style>' + ASSIST_CSS + '</style>' +
+      '<div class="layer">' +
+        '<button class="chip" hidden title="Rewrite the selected text with AI">✨ AI</button>' +
+        '<div class="card" hidden role="dialog" aria-label="Rewrite with AI"></div>' +
+        '<div class="changes" hidden role="dialog" aria-label="Changes"></div>' +
+      '</div>';
+    doc().documentElement.appendChild(host);
+
+    var chip = shadow.querySelector('.chip');
+    // mousedown with the default prevented: the selection is what is being
+    // rewritten, and a normal click would clear it before the scope is read.
+    chip.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      openAI();
+    });
+    // Clicks inside the card or the list are not clicks "away" from them.
+    shadow.querySelector('.card').addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    shadow.querySelector('.changes').addEventListener('mousedown', function (e) { e.stopPropagation(); });
+
+    state.assist = {
+      host: host, chip: chip,
+      card: shadow.querySelector('.card'),
+      changes: shadow.querySelector('.changes'),
+    };
+    return state.assist;
+  }
+
+  function removeAssist() {
+    if (state.assist && state.assist.host.parentNode) {
+      state.assist.host.parentNode.removeChild(state.assist.host);
+    }
+    state.assist = null;
+    state.aiJob = null;
+  }
+
+  function hideChip() { if (state.assist) state.assist.chip.hidden = true; }
+
+  /*
+   * Where the chip goes. With a pointer, at the end of the selection, sitting
+   * on its last line rather than over the line below. On touch, below it: the
+   * system's own selection toolbar sits above, and the chip should not fight
+   * it for the space.
+   */
+  function placeChip(rect) {
+    var a = ensureAssist();
+    var w = win();
+    a.chip.hidden = false;
+    var cw = a.chip.offsetWidth || 60;
+    var chh = a.chip.offsetHeight || 26;
+    var coarse = w.matchMedia && w.matchMedia('(pointer: coarse)').matches;
+    var end = endRect() || rect;
+    var left, top;
+    if (coarse) {
+      left = Math.min(Math.max(8, end.right - cw), w.innerWidth - cw - 8);
+      top = rect.bottom + 10;
+    } else {
+      // Above where the selection ends, clear of the text on either side.
+      left = Math.min(Math.max(8, end.right - cw / 2), w.innerWidth - cw - 8);
+      top = end.top - chh - 6;
+      if (top < 8) top = rect.bottom + 8;
+    }
+    if (top + chh > w.innerHeight - 8) top = Math.max(8, rect.top - chh - 8);
+    a.chip.style.left = left + 'px';
+    a.chip.style.top = top + 'px';
+  }
+
+  // The last line box of the selection — where the user stopped dragging.
+  function endRect() {
+    var sel = doc().getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    var rects = sel.getRangeAt(0).getClientRects();
+    for (var i = rects.length - 1; i >= 0; i--) {
+      if (rects[i].width > 0 || rects[i].height > 0) return rects[i];
+    }
+    return null;
+  }
+
+  function onSelectionChange() {
+    if (!state.active) return;
+    if (state.aiJob) return;             // the card is open; leave it be
+    var scope = selectionScope();
+    if (!scope || !scope.rect || (!scope.rect.width && !scope.rect.height)) { hideChip(); return; }
+    placeChip(scope.rect);
+  }
+
+  function onScrollAssist() {
+    if (!state.assist) return;
+    if (state.aiJob) { placeCard(); return; }
+    if (!state.assist.chip.hidden) onSelectionChange();
+  }
+
+  function openAI() {
+    var scope = selectionScope();
+    if (!scope) { hideChip(); return; }
+    hideChip();
+    state.aiJob = { scope: scope, status: 'choose', token: 0 };
+    renderAI();
+    if (state.ai) {
+      Promise.resolve(state.ai.status()).then(function (st) {
+        if (state.aiJob && state.aiJob.scope === scope && !(st && st.configured)) {
+          state.aiJob.status = 'error';
+          state.aiJob.error = 'AI rewrites need your own Anthropic API key. ' + (state.ai.settingsHint || '');
+          renderAI();
+        }
+      }).catch(function () {});
+    }
+  }
+
+  function closeAI() {
+    state.aiJob = null;
+    if (state.assist) state.assist.card.hidden = true;
+  }
+
+  function isAIOpen() { return !!state.aiJob; }
+
+  function runAI(instruction, label) {
+    var job = state.aiJob;
+    if (!job) return;
+    if (!state.ai) {
+      job.status = 'error';
+      job.error = 'AI rewrites are not available here.';
+      renderAI();
+      return;
+    }
+    job.status = 'running';
+    job.instruction = instruction;
+    job.label = label;
+    var token = ++job.token;
+    renderAI();
+
+    state.ai.rewrite({
+      segments: job.scope.segments.map(toModelText),
+      instruction: instruction,
+      before: toModelText(job.scope.before || ''),
+      after: toModelText(job.scope.after || ''),
+    }).then(function (res) {
+      if (state.aiJob !== job || job.token !== token) return;     // superseded
+      job.status = 'preview';
+      job.result = res.segments;
+      job.model = res.model || '';
+      renderAI();
+    }).catch(function (err) {
+      if (state.aiJob !== job || job.token !== token) return;
+      job.status = 'error';
+      job.error = String((err && err.message) || err);
+      renderAI();
+    });
+  }
+
+  function acceptAI() {
+    var job = state.aiJob;
+    if (!job || job.status !== 'preview') return;
+    var res = applyRewrite(job.scope, job.result, { label: job.label, model: job.model });
+    if (!res.ok) {
+      job.status = 'error';
+      job.error = res.message;
+      renderAI();
+      return;
+    }
+    closeAI();
+    flash('Rewrite applied — Ctrl/Cmd+Z undoes it');
+  }
+
+  function el(tag, cls, text) {
+    var n = doc().createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function button(cls, text, onClick) {
+    var b = el('button', cls, text);
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function renderAI() {
+    var a = ensureAssist();
+    var job = state.aiJob;
+    var card = a.card;
+    if (!job) { card.hidden = true; return; }
+    card.hidden = false;
+    card.textContent = '';
+
+    var head = el('div', 'a-head');
+    head.appendChild(el('span', 'a-title', '✨ Rewrite with AI'));
+    var x = button('x', '×', closeAI);
+    x.title = 'Close';
+    head.appendChild(x);
+    card.appendChild(head);
+    card.appendChild(el('div', 'a-scope', job.scope.mode === 'part'
+      ? 'The words you selected.'
+      : 'This whole ' + describeTag(job.scope.block ? job.scope.block.localName : 'paragraph') +
+        ', with its formatting kept where it is.'));
+
+    if (job.status === 'choose') {
+      var presets = el('div', 'a-presets');
+      var list = AI() ? AI().PRESETS : [];
+      list.forEach(function (pr) {
+        presets.appendChild(button('a-preset', pr.label, function () { runAI(pr.instruction, pr.label); }));
+      });
+      card.appendChild(presets);
+
+      var form = el('form', 'a-custom');
+      var input = el('input', 'a-input');
+      input.id = 'qe-ai-instruction';
+      input.placeholder = 'Or say what you want…';
+      input.setAttribute('aria-label', 'What should the rewrite do?');
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); closeAI(); }
+        e.stopPropagation();
+      });
+      form.appendChild(input);
+      var go = el('button', 'a-btn primary', 'Rewrite');
+      go.type = 'submit';
+      form.appendChild(go);
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var what = input.value.trim();
+        if (what) runAI(what, what.length > 40 ? what.slice(0, 40) + '…' : what);
+      });
+      card.appendChild(form);
+      card.appendChild(el('div', 'a-meta',
+        'Only this text is sent, to Anthropic, using your own API key. You see the result before anything changes.'));
+    } else if (job.status === 'running') {
+      card.appendChild(el('div', '', 'Rewriting — ' + job.label + '…'));
+      var row = el('div', 'a-row');
+      row.appendChild(button('a-btn', 'Cancel', closeAI));
+      card.appendChild(row);
+    } else if (job.status === 'preview') {
+      var box = el('div', 'a-diff');
+      if (job.scope.mode === 'part') {
+        diffInto(box, job.scope.segments[0], fromModelText(job.result[0], job.scope.segments[0]));
+      } else {
+        diffInto(box, job.scope.segments.join(''),
+          job.result.map(function (seg, i) { return fromModelText(seg, job.scope.segments[i]); }).join(''));
+      }
+      card.appendChild(box);
+      var rowP = el('div', 'a-row');
+      rowP.appendChild(button('a-btn primary', 'Accept', acceptAI));
+      rowP.appendChild(button('a-btn', 'Try again', function () { runAI(job.instruction, job.label); }));
+      rowP.appendChild(button('a-btn', 'Back', function () { job.status = 'choose'; renderAI(); }));
+      card.appendChild(rowP);
+      card.appendChild(el('div', 'a-meta', job.label + (job.model ? ' · ' + job.model : '') +
+        ' · nothing changes until you accept'));
+    } else {
+      card.appendChild(el('div', 'a-error', job.error || 'Something went wrong.'));
+      var rowE = el('div', 'a-row');
+      rowE.appendChild(button('a-btn', 'Back', function () { job.status = 'choose'; renderAI(); }));
+      if (state.ai && state.ai.openSettings) {
+        rowE.appendChild(button('a-btn primary', 'AI settings', function () { state.ai.openSettings(); }));
+      }
+      card.appendChild(rowE);
+    }
+
+    placeCard();
+    var first = card.querySelector('.a-input');
+    if (first && job.status === 'choose') first.focus({ preventScroll: true });
+  }
+
+  function placeCard() {
+    var a = state.assist;
+    var job = state.aiJob;
+    if (!a || !job) return;
+    var w = win();
+    var rect = job.scope.rect;
+    var cw = a.card.offsetWidth || 360;
+    var ch = a.card.offsetHeight || 220;
+    var left = Math.min(Math.max(12, rect.left), w.innerWidth - cw - 12);
+    var top = rect.bottom + 10;
+    if (top + ch > w.innerHeight - 12) top = rect.top - ch - 10;
+    if (top < 12) top = Math.max(12, w.innerHeight - ch - 80);
+    a.card.style.left = Math.max(12, left) + 'px';
+    a.card.style.top = top + 'px';
   }
 
   // --- saving ----------------------------------------------------------------
@@ -1753,11 +2653,14 @@
 
       if (region.token) {
         if (text === region.original) continue;      // untouched
+        // An edited note keeps the attribution it came with: it is still that
+        // person's comment, and re-signing it would claim otherwise.
         edits.push({
           start: region.token.start,
           end: region.token.end,
           replacement: Comments.markup(
-            text, Blocks.indentOf(state.source, region.token.start), newline),
+            text, Blocks.indentOf(state.source, region.token.start), newline,
+            { author: region.author, date: region.date }),
         });
         continue;
       }
@@ -1765,7 +2668,14 @@
       edits.push({
         start: region.anchor.offset,
         end: region.anchor.offset,
-        replacement: Comments.markup(text, region.anchor.indent, newline) + region.anchor.after,
+        // Attributed only once the user has given a name. Someone who never
+        // touches the feature gets exactly the plain comment they always did,
+        // rather than a date stamped on every note they write.
+        replacement: Comments.markup(text, region.anchor.indent, newline,
+          (region.author || authorName())
+            ? { author: region.author || authorName(), date: region.date || Comments.today() }
+            : null) +
+          region.anchor.after,
       });
     }
   }
@@ -2000,6 +2910,7 @@
       teardownRegions();
       clearHighlights();
       closeRail();
+      removeAssist();
       removeStatusBar();
       // The stylesheet stays: any wrappers left holding unsaved edits still need
       // `all: unset` to remain invisible.
@@ -2011,6 +2922,16 @@
 
   function init(options) {
     state.doc = options.doc || null;
+    state.settings = options.settings || null;
+    state.ai = options.ai || null;
+    state.author = options.author || '';
+    if (state.settings) {
+      Promise.resolve(state.settings.get('author')).then(function (name) {
+        state.author = Comments.cleanName(name || '');
+        renderMore();
+        renderRail();
+      }).catch(function () { /* no stored name is fine */ });
+    }
     // A host that owns saving supplies this: text -> Promise<{ok, where}>. The
     // web app writes through a file handle, shares, or downloads, and knows
     // which of those it did; the extension supplies nothing and keeps the
@@ -2046,6 +2967,8 @@
       canUndo: state.historyAt > 0,
       canRedo: state.historyAt < state.history.length,
       writeBack: state.served && state.served.canPut ? 'server' : 'download',
+      author: authorName(),
+      changeCount: collectChanges().length,
     };
   }
 
@@ -2058,6 +2981,14 @@
     serialise: serialise,
     addAfterIsland: addAfterIsland,
     insertStructure: insertStructure,
+    // Authorship, the list of changes and AI rewrites. applyRewrite and
+    // selectionScope are exposed so the suite can drive a rewrite without a
+    // network or a real selection gesture.
+    setAuthor: setAuthor,
+    changes: collectChanges,
+    selectionScope: selectionScope,
+    applyRewrite: applyRewrite,
+    openChanges: openChanges,
     atEndOfBlock: atEndOfBlock,
     addCommentTo: addCommentTo,
     removeComment: removeComment,

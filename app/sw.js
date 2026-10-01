@@ -17,7 +17,7 @@
 
 // Bump this to retire the previous cache. It is the app's shell version, not
 // the extension's.
-const CACHE = 'quick-edit-shell-v1';
+const CACHE = 'quick-edit-shell-v2';
 
 const SHELL = [
   'index.html',
@@ -31,6 +31,8 @@ const SHELL = [
   '../src/lib/islands.js',
   '../src/lib/blocks.js',
   '../src/lib/structures.js',
+  '../src/vendor/anthropic-sdk.js',
+  '../src/lib/ai.js',
   '../src/lib/comments.js',
   '../src/lib/prompt.js',
   '../src/editor.js',

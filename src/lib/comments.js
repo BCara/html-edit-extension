@@ -15,6 +15,18 @@
  *
  * Writing one is the same zero-length splice that adding a block uses, so it
  * displaces nothing.
+ *
+ * WHO WROTE IT
+ * ------------
+ * A comment can carry its author and the day it was written, in brackets
+ * before the colon:
+ *
+ *     <!-- comment [Cara · 2026-10-01]: needs a figure for Q3 -->
+ *
+ * The name is whatever the writer typed into Quick Edit — self-declared, not
+ * verified — so it says who claims to have written a note, which is what a
+ * team that trusts each other needs, and no more. The plain form without
+ * brackets is still read, so notes from before authorship existed keep working.
  */
 (function (root) {
   'use strict';
@@ -29,14 +41,47 @@
    * Continuation lines are trimmed, since their indentation is only there to
    * make the file readable.
    */
-  function textOf(data) {
-    var match = /^\s*comment:\s*([\s\S]*)$/i.exec(data);
+  var COMMENT_RE = /^\s*comment(?:\s*\[([^\]\n]*)\])?\s*:\s*([\s\S]*)$/i;
+
+  /*
+   * One of ours, pulled apart: { text, author, date }, or null if this comment
+   * is somebody else's. author and date are null when the note has none.
+   */
+  function parse(data) {
+    var match = COMMENT_RE.exec(data);
     if (!match) return null;
-    return match[1]
+    var author = null, date = null;
+    if (match[1] !== undefined) {
+      var bits = match[1].split('\u00b7').map(function (b) { return b.trim(); });
+      if (bits.length > 1 && /^\d{4}-\d{2}-\d{2}$/.test(bits[bits.length - 1])) {
+        date = bits.pop();
+      }
+      author = bits.join(' \u00b7 ') || null;
+    }
+    var text = match[2]
       .split('\n')
       .map(function (line) { return line.trim(); })
       .join('\n')
       .replace(/\s+$/, '');
+    return { text: text, author: author, date: date };
+  }
+
+  function textOf(data) {
+    var parsed = parse(data);
+    return parsed ? parsed.text : null;
+  }
+
+  /*
+   * A name that can sit inside the brackets: one line, no closing bracket, no
+   * run of hyphens that could end the comment early, and not endless.
+   */
+  function cleanName(name) {
+    return String(name || '')
+      .replace(/[\r\n\]\[]/g, ' ')
+      .replace(/-{2,}/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 60);
   }
 
   /*
@@ -54,12 +99,28 @@
       .replace(/-$/, '- ');
   }
 
-  function markup(text, indent, newline) {
+  // "[Cara · 2026-10-01]", or "" when there is nothing to attribute.
+  function attribution(meta) {
+    var author = cleanName(meta && meta.author);
+    var date = meta && meta.date && /^\d{4}-\d{2}-\d{2}$/.test(meta.date) ? meta.date : '';
+    if (!author && !date) return '';
+    return ' [' + [author, date].filter(Boolean).join(' \u00b7 ') + ']';
+  }
+
+  function markup(text, indent, newline, meta) {
     var lines = sanitise(text).split('\n');
     var body = lines.map(function (line, i) {
       return i === 0 ? line : indent + CONTINUATION + line;
     }).join(newline);
-    return '<!-- comment: ' + body + ' -->';
+    return '<!-- comment' + attribution(meta) + ': ' + body + ' -->';
+  }
+
+  // Today, as the brackets record it: local date, not UTC, since the person
+  // writing the note means their own today.
+  function today(now) {
+    var d = now || new Date();
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
 
   /*
@@ -99,6 +160,9 @@
   }
 
   root.QuickEditComments = {
+    parse: parse,
+    cleanName: cleanName,
+    today: today,
     textOf: textOf,
     sanitise: sanitise,
     markup: markup,

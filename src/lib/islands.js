@@ -111,6 +111,29 @@
     return idx;
   }
 
+  /*
+   * Where a DOM position — a (container, offset) pair, as a Range gives — falls
+   * in the island's flattened value. The same counting as caretIndex(), for any
+   * point rather than only the caret's end, so a selection's two ends can both
+   * be turned into indexes. Returns null for a point outside the island.
+   */
+  function indexAt(el, container, offset) {
+    if (!el.contains(container)) return null;
+    var idx = 0;
+    var n;
+    if (container === el) {
+      var i = 0;
+      for (n = el.firstChild; n && i < offset; n = n.nextSibling, i++) idx += lengthOf(n);
+      return idx;
+    }
+    for (n = el.firstChild; n; n = n.nextSibling) {
+      if (n === container) return idx + offset;
+      if (n.contains && n.contains(container)) return idx;
+      idx += lengthOf(n);
+    }
+    return idx;
+  }
+
   // Put the caret at `index` in the island's flattened value, clamped to fit.
   function setCaret(el, index) {
     var doc = el.ownerDocument;
@@ -147,6 +170,7 @@
     writeValue: writeValue,
     isClean: isClean,
     caretIndex: caretIndex,
+    indexAt: indexAt,
     setCaret: setCaret,
   };
 })(typeof self !== 'undefined' ? self : globalThis);

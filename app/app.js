@@ -57,6 +57,64 @@ var current = {
 var CAN_HANDLE = typeof window.showOpenFilePicker === 'function';
 
 var RECENTS_KEY = 'quick-edit:recent-network-documents';
+
+// --- your name and AI ----------------------------------------------------------
+
+/*
+ * Stored in this browser only. The API key can live in the app's own storage
+ * because the document being edited never shares a script context with it:
+ * it is rendered into a frame sandboxed without scripts, so nothing an
+ * AI-written HTML file carries can run, let alone read the key.
+ */
+var STORE = {
+  author: 'quick-edit:author',
+  aiKey: 'quick-edit:ai-key',
+  aiModel: 'quick-edit:ai-model',
+};
+
+function readStore(key) {
+  try { return localStorage.getItem(key) || ''; } catch (e) { return ''; }
+}
+function writeStore(key, value) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch (e) { /* a private window may refuse; the setting just will not stick */ }
+}
+
+var SETTINGS = {
+  get: function (key) { return Promise.resolve(readStore(STORE[key] || key)); },
+  set: function (key, value) { writeStore(STORE[key] || key, value); return Promise.resolve(); },
+};
+
+function aiConfig() {
+  var AI = window.QuickEditAI;
+  return {
+    key: readStore(STORE.aiKey),
+    model: AI.modelById(readStore(STORE.aiModel) || AI.DEFAULT_MODEL),
+  };
+}
+
+var AI_BRIDGE = {
+  settingsHint: 'Open Settings at the top of the page.',
+  openSettings: function () { openSettings(); },
+  status: function () {
+    var c = aiConfig();
+    return Promise.resolve({ configured: !!c.key, modelLabel: c.model.label });
+  },
+  rewrite: function (request) {
+    var AI = window.QuickEditAI;
+    var SDK = window.QuickEditAnthropicSDK && window.QuickEditAnthropicSDK.Anthropic;
+    var c = aiConfig();
+    if (!SDK) return Promise.reject(new Error('The AI library did not load.'));
+    return AI.rewrite(SDK, c.key, Object.assign({}, request, { model: c.model.id }))
+      .catch(function (err) {
+        var e = new Error(AI.describeError(err, SDK));
+        e.code = err && err.code;
+        throw e;
+      });
+  },
+};
 var RECENTS_MAX = 6;
 
 // --- chrome ------------------------------------------------------------------
@@ -197,6 +255,8 @@ async function load(source, name, handle) {
     map: map,
     filename: current.name,
     saveFile: saveFile,
+    settings: SETTINGS,
+    ai: AI_BRIDGE,
   });
   window.QuickEditEditor.setActive(true);
 
@@ -577,6 +637,76 @@ function acceptLaunchedFile() {
   });
 }
 
+// --- the settings dialog ----------------------------------------------------------
+
+function openSettings() {
+  var AI = window.QuickEditAI;
+  var dlg = document.getElementById('settings');
+  var model = document.getElementById('set-model');
+  if (!model.options.length) {
+    AI.MODELS.forEach(function (m) {
+      var opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.label;
+      model.appendChild(opt);
+    });
+  }
+  var c = aiConfig();
+  document.getElementById('set-author').value = readStore(STORE.author);
+  model.value = c.model.id;
+  var key = document.getElementById('set-key');
+  key.value = '';
+  key.placeholder = c.key ? 'Saved \u2014 ends \u2026' + c.key.slice(-4) + '. Type a new one to replace it.'
+                          : 'sk-ant-\u2026';
+  document.getElementById('set-forget').hidden = !c.key;
+  describeModel();
+  settingsStatus(c.key ? 'Ready: select text in a document, then press \u2728 AI.'
+                       : 'No key yet. Everything else works without one.', c.key ? 'good' : '');
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', '');
+}
+
+function describeModel() {
+  var AI = window.QuickEditAI;
+  document.getElementById('set-model-note').textContent =
+    AI.modelById(document.getElementById('set-model').value).note;
+}
+
+function settingsStatus(text, tone) {
+  var el = document.getElementById('set-status');
+  el.textContent = text;
+  el.className = 'hint' + (tone ? ' ' + tone : '');
+}
+
+(function wireSettings() {
+  var dlg = document.getElementById('settings');
+  document.getElementById('settings-open').addEventListener('click', openSettings);
+  document.getElementById('set-model').addEventListener('change', describeModel);
+  document.getElementById('set-cancel').addEventListener('click', function () { dlg.close(); });
+  document.getElementById('set-forget').addEventListener('click', function () {
+    writeStore(STORE.aiKey, '');
+    document.getElementById('set-forget').hidden = true;
+    document.getElementById('set-key').placeholder = 'sk-ant-\u2026';
+    settingsStatus('Key removed from this browser.');
+  });
+
+  document.getElementById('settings-form').addEventListener('submit', function (e) {
+    var typed = document.getElementById('set-key').value.trim();
+    if (typed && !/^sk-ant-/.test(typed)) {
+      e.preventDefault();
+      settingsStatus('That does not look like an Anthropic API key \u2014 they start with sk-ant-.', 'bad');
+      return;
+    }
+    var name = document.getElementById('set-author').value.replace(/\s+/g, ' ').trim().slice(0, 60);
+    writeStore(STORE.author, name);
+    writeStore(STORE.aiModel, document.getElementById('set-model').value);
+    if (typed) writeStore(STORE.aiKey, typed);
+    // An open document picks the name up straight away.
+    if (window.QuickEditEditor && current.source) window.QuickEditEditor.setAuthor(name);
+    toast(typed ? 'Saved. Select text in the document, then press \u2728 AI.' : 'Saved.');
+  });
+})();
+
 describeSaving();
 registerWorker();
 acceptLaunchedFile();
@@ -588,6 +718,8 @@ openFromQuery();
 window.__quickEditApp = {
   load: load,
   saveFile: saveFile,
+  aiBridge: AI_BRIDGE,
+  settings: SETTINGS,
   current: current,
   canHandle: CAN_HANDLE,
 };

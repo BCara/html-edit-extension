@@ -7,7 +7,7 @@
   // cannot work without it — see the justification on each one.
   "manifest_version": 3,
   "name": "Quick Edit",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Edit the visible text of an HTML document — local, or served from your own network — and save it without disturbing the markup.",
 
   "permissions": [
@@ -35,7 +35,12 @@
     // download. Used with saveAs:true so the OS file dialog always opens and
     // the user chooses the destination (including, deliberately, the original
     // file). No download is ever started without the user pressing Save.
-    "downloads"
+    "downloads",
+
+    // storage — the name the user types, and, only if they add one, their own
+    // Anthropic API key and chosen model. Kept in this browser profile on this
+    // device. Nothing about any document is ever stored.
+    "storage"
   ],
 
   // Not requested up front, only asked for if it turns out to be needed.
@@ -50,10 +55,14 @@
   // with a button and Chrome shows its own consent prompt. If it is refused, or
   // if the service worker cannot read file URLs at all, the extension falls
   // back to asking the user to choose the file — which needs no permission.
-  "optional_host_permissions": ["file:///*"],
+  //
+  // api.anthropic.com is optional for the same reason: AI rewrites are opt-in,
+  // and the permission is asked for only when the user saves an API key. The
+  // call is made from the service worker, so the key never enters a page.
+  "optional_host_permissions": ["file:///*", "https://api.anthropic.com/*"],
 
-  // No "storage": nothing is persisted anywhere.
-  // No remote hosts: the extension makes no network requests at all.
+  // Network: none of its own, except — only when the user has added their own
+  // key and asked for a rewrite — the selected text to api.anthropic.com.
   //
   // Reading local files ALSO requires the user to tick "Allow access to file
   // URLs" on chrome://extensions. That is a separate, user-granted toggle, not

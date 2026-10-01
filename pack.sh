@@ -34,7 +34,7 @@ zip -r -q "$OUT" \
   packages/html-splice/src \
   packages/html-splice/LICENSE \
   LICENSE \
-  -x '*/.*'
+  -x '*/.*' '*.test.js'
 
 echo "wrote $OUT"
 unzip -l "$OUT" | tail -n +4 | head -n -2 | awk '{print "  " $4}'

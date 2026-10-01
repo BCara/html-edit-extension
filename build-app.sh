@@ -35,6 +35,8 @@ cp "$DIR/packages/html-splice/src/tokenizer.js" \
    "$DIR/src/lib/islands.js" \
    "$DIR/src/lib/blocks.js" \
    "$DIR/src/lib/structures.js" \
+   "$DIR/src/lib/ai.js" \
+   "$DIR/src/vendor/anthropic-sdk.js" \
    "$DIR/src/lib/comments.js" \
    "$DIR/src/lib/prompt.js" \
    "$DIR/src/editor.js" \
@@ -52,6 +54,7 @@ for f in "$OUT/index.html" "$OUT/sw.js" "$OUT/manifest.webmanifest"; do
   sed -i \
     -e 's|\.\./packages/html-splice/src/|lib/|g' \
     -e 's|\.\./src/lib/|lib/|g' \
+    -e 's|\.\./src/vendor/|lib/|g' \
     -e 's|\.\./src/editor\.js|lib/editor.js|g' \
     -e 's|\.\./icons/|icons/|g' \
     "$f"
