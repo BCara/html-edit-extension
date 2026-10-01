@@ -23,16 +23,75 @@ for (const [url, want] of [
   ['http://127.0.0.1:8080/a.htm', 'lan'],
   ['http://10.1.2.3/x.html', 'lan'],
   ['http://172.16.0.1/x.html', 'lan'],
-  ['http://172.32.0.1/x.html', null],
+  // Outside RFC1918 (172.16–31 only), so this is the public internet.
+  ['http://172.32.0.1/x.html', 'copy'],
   ['http://100.110.36.48:5000/x.html', 'lan'],
   ['https://nas.local/doc.html', 'lan'],
-  ['https://example.com/a.html', null],
+  ['https://example.com/a.html', 'copy'],
+  // A hosted document very often has no extension. 'copy' never writes back,
+  // so the path tells us nothing worth refusing over; coverage is the gate.
+  ['https://example.com/docs/getting-started', 'copy'],
+  ['https://example.com/', 'copy'],
+  // A private server is held to the stricter rule: an extensionless route
+  // there is far more likely to be an application than a document.
   ['http://192.168.1.71:5000/api/route', null],
   ['chrome://extensions', null],
   ['not a url at all', null],
 ]) {
   ok(O.classify(url).kind === want, (want || 'refused') + ': ' + url.slice(0, 62),
      'got ' + O.classify(url).kind);
+}
+
+/*
+ * The guarantee that makes 'copy' safe to offer at all. Somebody else's
+ * website is not ours to write to, and this is the one place that decides it,
+ * so it is asserted here rather than left to each caller to remember.
+ */
+section('mayWriteBack — only a server on your own network');
+ok(O.mayWriteBack('lan'), 'a LAN server may be written back to');
+ok(!O.mayWriteBack('copy'), 'a public page never is');
+ok(!O.mayWriteBack('file'), 'and a local file is saved, not PUT');
+ok(!O.mayWriteBack(null), 'and nothing unclassified is');
+for (const url of ['https://example.com/a.html', 'https://example.com/docs/x',
+                   'http://172.32.0.1/x.html']) {
+  ok(!O.mayWriteBack(O.classify(url).kind),
+     'no write-back for ' + url.slice(0, 48));
+}
+
+section('downloadName — what the saved file is called');
+for (const [url, want] of [
+  // A name of its own is kept, so a document saved off a NAS keeps its name.
+  ['http://192.168.1.71:5000/nas/plan.html', 'plan.html'],
+  ['http://192.168.1.71:5000/nas/plan.html#section', 'plan.html'],
+  ['file:///home/c/DIGISTAYBOOK_PLAN.html', 'DIGISTAYBOOK_PLAN.html'],
+  ['https://example.com/a/b/notes.htm', 'notes.htm'],
+  // A hosted page has no name, so one is built that says where it came from.
+  ['https://example.com/', 'example.com.html'],
+  ['https://example.com/docs/getting-started', 'example.com-docs-getting-started.html'],
+  ['https://docs.example.com/guide/v2/', 'docs.example.com-guide-v2.html'],
+  ['https://example.com/a%20b/c d', 'example.com-a-b-c-d.html'],
+  ['not a url', 'page.html'],
+]) {
+  ok(O.downloadName(url) === want, 'name: ' + url.slice(0, 50) + ' -> ' + want,
+     'got ' + O.downloadName(url));
+}
+
+/*
+ * This string becomes a download filename, so a path separator or a control
+ * character in it would be somebody else's URL choosing where a file lands.
+ */
+section('downloadName — a URL cannot steer where the file goes');
+for (const url of [
+  'https://example.com/../../etc/passwd',
+  'https://example.com/a%2Fb%2Fc',
+  'https://example.com/%2e%2e%2f%2e%2e%2fshadow',
+  'https://example.com/a%00b',
+  'https://example.com/%5Cwindows%5Csystem32',
+]) {
+  const name = O.downloadName(url);
+  ok(!/[\\/\x00-\x1f:]/.test(name), 'no separators or control chars: ' + name);
+  ok(!/^\.|\.\./.test(name), 'no leading dot and no traversal: ' + name);
+  ok(/\.x?html?$/i.test(name), 'and it still ends .html: ' + name);
 }
 
 section('acceptsWriteBack — Allow is a capability, CORS is a policy');

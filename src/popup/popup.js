@@ -66,7 +66,14 @@ function render(res) {
   show('<b>' + escapeHtml(res.filename) + '</b><br>' +
        '<span class="sub">' + plural(res.stats.editable, 'editable text region') +
        (ed.active && ed.changed ? ' · ' + plural(ed.changed, 'change') : '') +
-       '</span>');
+       '</span>' +
+       // Said here rather than only in the detail panel: someone editing a
+       // website needs to know before they start that the website is not
+       // changing, and that what they get is a file.
+       (res.kind === 'copy'
+         ? '<p class="note">You are editing a <b>copy</b> of this page. The site ' +
+           'itself is never written to — Save gives you the edited HTML as a file.</p>'
+         : ''));
 
   actionsEl.hidden = false;
   toggleEl.textContent = ed.active ? 'Stop editing' : 'Start editing';
@@ -128,12 +135,7 @@ function renderProblem(res) {
 
   if (res.code === 'not-editable') {
     // Say which rule was not met, rather than restating all of them.
-    if (res.reason === 'public-origin') {
-      show('This page is on the public internet. Quick Edit edits documents, not ' +
-           'websites, so it works on <code>file://</code> pages and on servers ' +
-           'inside your own network — <code>localhost</code>, a LAN address like ' +
-           '<code>192.168.x.x</code>, or a private mesh.');
-    } else if (res.reason === 'not-html') {
+    if (res.reason === 'not-html') {
       show('Quick Edit needs an HTML document — a path ending in ' +
            '<code>.html</code> or <code>.htm</code>.');
     } else {

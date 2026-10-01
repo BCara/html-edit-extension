@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.10.0';
+  var VERSION = '0.11.0';
   var REQUIRED = [
     'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
     'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
@@ -60,6 +60,7 @@
 
   var Editor = window.QuickEditEditor;
   var Prompt = window.QuickEditPrompt;
+  var Origins = window.QuickEditOrigins;
 
   var state = {
     source: null,     // original file text, verbatim
@@ -72,6 +73,7 @@
     // Set only when the user chose the file through showOpenFilePicker, which
     // is the one route that can also write to it. See saveThroughHandle().
     handle: null,
+    kind: null,             // 'file' | 'lan' | 'copy', from origins.js
     writesInPlace: false,   // a handle is in hand: Save overwrites silently
     canWriteFile: false,    // Save can write, once it has asked where
   };
@@ -111,9 +113,25 @@
     });
   }
 
+  /*
+   * What to call the file this document would be saved as.
+   *
+   * For a local file or a served document that is a file, the last path
+   * segment is its name and that is that. A hosted page may have no last
+   * segment at all (example.com/) or one with no extension
+   * (example.com/docs/getting-started), so the host and the path are used to
+   * build something a person will recognise in their Downloads folder, with
+   * .html on the end because that is what it is.
+   */
   function filename() {
-    var name = decodeURIComponent(location.pathname.split('/').pop() || '');
-    return name || 'page.html';
+    return Origins.downloadName(location.href);
+  }
+
+  // A page on the open web: edited the same way, but the result is a file the
+  // user now has, never a write to somebody else's server.
+  function isCopy() {
+    if (state.kind === null) state.kind = Origins.classify(location.href).kind;
+    return state.kind === 'copy';
   }
 
   /*
@@ -164,12 +182,14 @@
   function readServed(url) {
     return fetch(url, { credentials: 'same-origin' }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      state.served = {
+      // state.served is the write-back route, so a public page does not get
+      // one. Reading is identical; it is only saving that differs.
+      state.served = Origins.mayWriteBack(state.kind) ? {
         url: url.split('#')[0],
         etag: r.headers.get('ETag'),
         lastModified: r.headers.get('Last-Modified'),
         canPut: false,        // decided by probeWriteBack(), below
-      };
+      } : null;
       state.readVia = 'server';
       return r.text();
     }).catch(function (err) {
@@ -188,12 +208,15 @@
    * error, nothing to configure.
    */
   function probeWriteBack() {
-    if (!state.served) return Promise.resolve();
+    // Belt and braces: state.served is already null for a public page, and
+    // this says so again, because an OPTIONS request to somebody else's site
+    // asking whether we may overwrite it is not a thing to do by accident.
+    if (!state.served || !Origins.mayWriteBack(state.kind)) return Promise.resolve();
     return fetch(state.served.url, { method: 'OPTIONS', credentials: 'same-origin' })
       .then(function (r) {
         // See origins.js — the Allow header is the capability statement, and
         // Access-Control-Allow-Methods emphatically is not.
-        state.served.canPut = window.QuickEditOrigins.acceptsWriteBack(r.headers);
+        state.served.canPut = Origins.acceptsWriteBack(r.headers);
       })
       .catch(function () { /* no answer is a "no" */ });
   }
@@ -266,8 +289,11 @@
    * before — the saved edits are never riding on this working.
    */
   function saveThroughHandle() {
-    // A served document writes back over HTTP; the handle has no part in it.
-    if (isServed()) return Promise.resolve(null);
+    // A document on your own server writes back over HTTP; the handle has no
+    // part in it. A copy of somebody else's page is going to a file, so it
+    // does: Save asks once where to put it, and every save after that goes to
+    // the same file, which is what makes editing-then-handing-it-on bearable.
+    if (isServed() && !isCopy()) return Promise.resolve(null);
     if (!state.handle) return Promise.resolve(Prompt.canHandle ? writeFn() : null);
     return Prompt.canWrite(state.handle).then(function (allowed) {
       if (!allowed) {
@@ -366,6 +392,19 @@
       candidates++;
     }
     if (candidates === 0 || mapped / candidates >= 0.5) return null;
+
+    /*
+     * On the open web this is the ordinary case rather than a malfunction, and
+     * it deserves a sentence that says so. A page built in the browser serves
+     * a near-empty shell; the text on screen was never in the file, so there
+     * is nothing for Quick Edit to edit and no amount of retrying will help.
+     */
+    if (isCopy()) {
+      return 'This page is built in the browser, so the file the server sent has ' +
+             'almost none of this text in it — only ' + mapped + ' of ' + candidates +
+             ' regions line up. Quick Edit works on pages whose text is in the HTML: ' +
+             'documentation, articles, and most server-rendered sites.';
+    }
     return 'This file does not match the page — only ' + mapped + ' of ' + candidates +
            ' text regions line up. If you chose the file by hand, check it is the ' +
            'same one; otherwise the page may have rewritten itself after loading.';
@@ -402,6 +441,7 @@
   }
 
   function startReading() {
+    state.kind = Origins.classify(location.href).kind;
     return domReady().then(function () {
       return readSource(location.href);
     }).then(function (source) {

@@ -7,6 +7,9 @@ Works on local files (`file://`) and on documents served from your own network �
 `localhost`, a LAN address, a NAS, a private mesh. Where the server accepts it,
 Save writes the file back in place.
 
+It also works on a page out on the web, as a **copy**: edit it, comment on it,
+save it as a file. The site itself is never written to.
+
 ## The one rule
 
 **The saved file is the original file with only the words you changed replaced.**
@@ -154,6 +157,30 @@ the `×` on its card; a comment left empty is not written at all.
 | `Enter` | Line break, or a new block at the end of one |
 | `Ctrl`/`Cmd` + `Enter` | New block |
 
+### Marking up a page on the web
+
+Quick Edit also works on an ordinary website, with one difference that is not
+negotiable: **you are editing a copy.** The site is never written to, nothing
+is sent anywhere, and Save gives you the edited HTML as a file. The popup says
+so before you start.
+
+That makes it a review tool. Open a page, fix the wording, leave comments on
+the sections that need work, save, and hand the file to whoever — or whatever —
+is going to apply the changes. Because the saved file is the original source
+with only your words replaced, the diff is exactly your edit: no reformatted
+markup to read past, and the surrounding code is intact enough to act on.
+
+It works on pages whose text is in the HTML the server sent — documentation,
+articles, most server-rendered sites. It does **not** work on a page built in
+the browser, because the file the server sent has almost none of the text in
+it. That is not a bug that can be fixed: there is nothing in the source to
+edit. Quick Edit detects it and says so rather than offering an editor that
+does nothing.
+
+Write-back stays private-only. A server on your own network may accept a save;
+somebody else's website never does, and `mayWriteBack()` in
+[`src/lib/origins.js`](src/lib/origins.js) is the single place that decides it.
+
 ### Saving
 
 For a **served** document whose server accepts a write-back, Save writes the
@@ -163,10 +190,15 @@ change someone else made in the meantime, and the server keeps timestamped
 backups. See [server/README.md](server/README.md) — it is one dependency-free
 file to drop into an Express app.
 
-Otherwise Chrome cannot write back to a `file://` path, so Save is a download. The dialog
-opens on the original filename, and you can navigate back to the original and
-replace it — but that is your explicit choice, not something that happens
-quietly. Until you do, the original on disk is untouched.
+Otherwise Save writes a file. Where the browser allows it, Quick Edit asks once
+where to put it — pre-filled with the document's own name — and every save after
+that goes to the same file with no dialog. Choosing the original file is how you
+overwrite it, and that is your explicit choice rather than something that
+happens quietly.
+
+A copy of a hosted page has no name of its own, so one is built from the
+address: `example.com/docs/getting-started` saves as
+`example.com-docs-getting-started.html`.
 
 While edit mode is on, links do not navigate and forms do not submit: either one
 would throw away every unsaved edit.

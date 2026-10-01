@@ -33,6 +33,19 @@ h1 {
 .state { margin-bottom: 11px; }
 .state b { font-weight: 600; }
 .state .sub { color: var(--muted); }
+
+/* Editing a copy of a website is a different contract from editing a file,
+   and the person needs to know which one they are in before they start. */
+.state .note {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border-left: 3px solid #d9a01e;
+  background: rgba(217, 160, 30, .12);
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.45;
+}
 .state.warn {
   background: var(--warn-bg);
   color: var(--warn);

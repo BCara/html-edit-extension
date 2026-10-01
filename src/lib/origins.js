@@ -5,34 +5,50 @@
  * answer is a security boundary and a correctness boundary at the same time,
  * and it needs to read the same in the service worker and in the popup.
  *
- * TWO KINDS
- * ---------
+ * THREE KINDS
+ * -----------
  *   'file'  a file:// document. The original bytes are on disk.
  *   'lan'   an http(s):// document served from this machine or this private
- *           network. The original bytes are whatever the server sends back.
+ *           network. The original bytes are whatever the server sends back,
+ *           and where the server allows it, Save writes them back.
+ *   'copy'  any other http(s) page. Read and edited the same way, but SAVE
+ *           ALWAYS PRODUCES A FILE, never a write to the server. Somebody
+ *           else's website is not ours to write to, and nothing in this code
+ *           is allowed to think otherwise.
  *
- * WHY ONLY PRIVATE ADDRESSES
- * --------------------------
- * Not squeamishness — the model genuinely stops working on the open web.
+ * WHY WRITE-BACK IS PRIVATE-ONLY
+ * ------------------------------
+ * 'lan' is a document-served-as-a-file: a NAS, a `python -m http.server`, a
+ * static Express mount, a docs preview. Re-fetching it returns the same bytes
+ * the browser parsed, which is what makes a conditional PUT safe to offer.
  *
- * Quick Edit's promise rests on re-fetching the document and getting back
- * exactly the bytes the browser parsed into the page you are looking at. That
- * holds for a static file server. It does not hold for anything that renders
- * per request: a second fetch returns a different document, the offsets
- * describe text that is not on screen, and the map is quietly wrong. (It fails
- * safe — mapping.js verifies every span against its node and simply refuses to
- * make unverified text editable — but a page where nothing is editable and no
- * one can say why is a bad experience.)
+ * A public origin gets no such assumption. It may render per request, and the
+ * site is not the user's to overwrite in any case. So 'copy' never probes for
+ * PUT and never performs one: the result of editing is a file the user now
+ * has, which they can read, send on, or hand to something else to apply.
  *
- * Private addresses are where documents-served-as-files actually live: a NAS,
- * a `python -m http.server`, a static Express mount, a docs preview. Public
- * origins are overwhelmingly applications, not documents. Restricting to
- * private space also means the extension never needs standing host access to
- * anything on the internet, which keeps the permission story honest: activeTab
- * and nothing more.
+ * WHAT CAN GO WRONG ON A PUBLIC PAGE, AND WHY IT IS SAFE
+ * -----------------------------------------------------
+ * The thing Quick Edit relies on — the bytes it re-fetched being the bytes the
+ * browser parsed — is routinely false on the open web. A page built in the
+ * browser serves a near-empty shell, so the source has none of the text that
+ * is on screen. A page rendered per request returns something different the
+ * second time.
  *
- * The path must still end in .html/.htm/.xhtml. An extensionless route is far
- * more likely to be an application than a document.
+ * Both fail SAFE rather than silently: mapping.js verifies every span against
+ * its node and refuses to make unverified text editable, and content.js
+ * refuses outright when too little lines up. The cost of allowing 'copy' is
+ * therefore a clear "this page will not work, here is why", not a corrupted
+ * file. That is a price worth paying for the pages that do work, which is most
+ * documentation, most articles, and most server-rendered sites.
+ *
+ * A 'file' or 'lan' path must still end in .html/.htm/.xhtml, because an
+ * extensionless route on a private server is more likely to be an application
+ * than a document. 'copy' does not require it: a hosted document very often
+ * has no extension at all, and the coverage check is the real gate anyway.
+ *
+ * None of this needs standing host access. activeTab grants the active tab on
+ * a user gesture, and that is still the whole permission story.
  */
 (function (root) {
   'use strict';
@@ -89,7 +105,7 @@
     }
 
     if (u.protocol === 'http:' || u.protocol === 'https:') {
-      if (!isPrivateHost(u.hostname)) return { kind: null, reason: 'public-origin' };
+      if (!isPrivateHost(u.hostname)) return { kind: 'copy', host: u.host };
       if (!HTML_PATH.test(u.pathname)) return { kind: null, reason: 'not-html' };
       return { kind: 'lan', host: u.host };
     }
@@ -98,6 +114,48 @@
   }
 
   function isEditable(url) { return classify(url).kind !== null; }
+
+  /*
+   * What to call the file this URL would be saved as.
+   *
+   * A path ending in .html is already a name, and keeping it means a document
+   * saved from a NAS lands under the name it has there. Anything else is a
+   * hosted page with no name of its own — example.com/ , or
+   * example.com/docs/getting-started — so one is built from the host and the
+   * path, because "page.html" in a Downloads folder tells nobody anything.
+   *
+   * Everything outside [A-Za-z0-9._-] becomes a hyphen. That is stricter than
+   * any filesystem needs, and deliberately so: this string becomes a download
+   * filename, and a path separator or a control character in it is somebody
+   * else's URL deciding where a file lands.
+   */
+  function downloadName(url) {
+    var u;
+    try { u = new URL(url); } catch (e) { return 'page.html'; }
+
+    var parts = u.pathname.split('/').filter(Boolean).map(function (seg) {
+      try { return decodeURIComponent(seg); } catch (e) { return seg; }
+    });
+    var last = parts.length ? parts[parts.length - 1] : '';
+    if (HTML_PATH.test(last)) return last.replace(/[^A-Za-z0-9._-]+/g, '-');
+
+    var stem = [u.hostname].concat(parts).join('-')
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      // A run of dots collapses to one. "../.." cannot traverse once the
+      // separators are gone, but a filename containing ".." is a thing nobody
+      // wants to have to reason about twice.
+      .replace(/\.{2,}/g, '.')
+      .replace(/-{2,}/g, '-')
+      .replace(/^[-.]+|[-.]+$/g, '')
+      .slice(0, 120)
+      .replace(/[-.]+$/, '');
+    return (stem || 'page') + '.html';
+  }
+
+  // May Save write back to where the document came from? Only for a server on
+  // the user's own network, and only then if it says it accepts PUT. Asked as
+  // its own question so that no caller has to remember that 'copy' means no.
+  function mayWriteBack(kind) { return kind === 'lan'; }
 
   /*
    * Does an OPTIONS response say this resource implements PUT?
@@ -127,6 +185,8 @@
   root.QuickEditOrigins = {
     classify: classify,
     isEditable: isEditable,
+    mayWriteBack: mayWriteBack,
+    downloadName: downloadName,
     isPrivateHost: isPrivateHost,
     acceptsWriteBack: acceptsWriteBack,
   };

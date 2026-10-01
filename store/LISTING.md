@@ -56,7 +56,11 @@ WHERE IT WORKS
 - Local files opened from file://
 - Documents served from your own network: localhost, a LAN address, a NAS, a private mesh
 
-Not on public websites. That is deliberate: the guarantee above depends on re-reading the exact document the browser parsed, which holds for a file server and does not hold for a page that renders anew on every request.
+- Any other web page, as a copy: edit it, comment on it, save the edited HTML as a file. The site itself is never written to, and nothing is sent anywhere.
+
+Saving back to the server it came from is deliberately limited to your own network. The guarantee above depends on re-reading the exact document the browser parsed; that holds for a file server and does not hold for a page that renders anew on every request, and somebody else's site is not yours to overwrite in any case.
+
+A page built in the browser cannot be edited, because the HTML the server sent has almost none of its text in it. Quick Edit detects that and says so.
 
 COMMENTS THAT TRAVEL WITH THE FILE
 
