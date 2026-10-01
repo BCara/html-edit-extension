@@ -462,6 +462,88 @@ async function run() {
        'and the document after it still parses');
   }
 
+  heading('comments — replies are notes that share a section');
+  {
+    const before = QuickEditEditor.preview();
+    const first = QuickEditEditor.addCommentTo(document.getElementById('p5'));
+    writeComment(first, 'Is this number right?');
+    const reply = QuickEditEditor.addCommentTo(document.getElementById('p5'));
+    writeComment(reply, 'Checked it — yes.');
+
+    const out = QuickEditEditor.preview();
+    eq(singleDiff(before, out).removed, '', 'a thread replaces nothing in the file');
+
+    const asked = out.indexOf('Is this number right?');
+    const answered = out.indexOf('Checked it — yes.');
+    ok(asked !== -1 && answered !== -1, 'both notes are written');
+    ok(asked < answered, 'the reply follows the note it answers');
+    ok(answered < out.indexOf('<p class="note" id="p5">'),
+       'and the whole thread sits before the section it is about');
+
+    // Nothing in the file marks a reply; it is one because it shares a block.
+    ok(QuickEditEditor.commentRegions().filter((r) => r.block === document.getElementById('p5'))
+       .length === 2, 'both notes are attached to the same section');
+  }
+
+  heading('comments — the visible form says the same thing');
+  {
+    const hidden = QuickEditEditor.preview();
+    ok(hidden.indexOf('data-qe-comment') === -1, 'notes are invisible by default');
+
+    QuickEditEditor.setCommentsVisible(true);
+    const shown = QuickEditEditor.preview();
+    ok(shown.indexOf('<!-- comment') === -1, 'turning it on leaves no hidden notes behind');
+
+    const page = new DOMParser().parseFromString(shown, 'text/html');
+    const notes = page.querySelectorAll('[data-qe-comment]');
+    ok(notes.length > 1, 'every note became an element a browser will show (' + notes.length + ')');
+    ok(page.body.textContent.indexOf('Is this number right?') !== -1,
+       'and the words are now readable without Quick Edit');
+
+    // The round trip is the whole reason this is safe to offer as a switch.
+    const asked = [...notes].find((n) => n.textContent.indexOf('Is this number right?') !== -1);
+    const parsed = QuickEditComments.parseElement(asked);
+    eq(parsed.text, 'Is this number right?', 'the note reads back with its words intact');
+    ok(shown.indexOf('style="') !== -1, 'styled inline, so it needs no stylesheet to look right');
+    // A double quote anywhere in that style would end the attribute early and
+    // spill the rest of it into the document as stray text. "Segoe UI" did
+    // exactly that until the font stack was quoted with apostrophes.
+    ok(/sans-serif/.test(asked.getAttribute('style')),
+       'and the whole style survived being put in an attribute');
+    ok(asked.textContent.indexOf('Segoe') === -1,
+       'with none of it spilled into the words the reader sees');
+
+    // An author survives the trip through the attribute.
+    const signed = [...notes].find((n) => n.getAttribute('data-qe-comment'));
+    if (signed) {
+      const back = QuickEditComments.parseElement(signed);
+      ok(!!(back.author || back.date), 'and so does who wrote it, and when');
+    }
+
+    /*
+     * The part that decides whether this is a feature or a trap: reopening the
+     * saved file has to find the note's own range, start tag to end tag, or it
+     * could never be edited, deleted or switched back again.
+     */
+    const reopened = QuickEditMap.build(shown, page);
+    const tags = reopened.elements.get(asked);
+    ok(!!(tags && tags.startTag && tags.endTag),
+       'reopening the file finds the note\'s range in it');
+    const slice = shown.slice(tags.startTag.start, tags.endTag.end);
+    ok(slice.indexOf('Is this number right?') !== -1 && slice.indexOf('</div>') === slice.length - 6,
+       'and that range is exactly the note, nothing more');
+
+    // A visible note is the editor's own, not the author's prose, so it must
+    // not also turn up as a paragraph the user can type into.
+    const editableInside = reopened.records.filter(
+      (r) => r.editable && asked.contains(r.node));
+    eq(editableInside.length, 0, 'and it is not offered as editable text as well');
+
+    QuickEditEditor.setCommentsVisible(false);
+    eq(QuickEditEditor.preview(), hidden,
+       'and turning it off again restores the file byte for byte');
+  }
+
   heading('the file, end to end');
   {
     const edited = QuickEditEditor.preview();
@@ -991,6 +1073,51 @@ async function run() {
     eq(calls.length, 1, 'the host was asked');
     eq(QuickEditEditor.status().unsaved, floor + 1,
        'nothing was marked saved, and nothing was downloaded behind the user');
+  }
+
+  heading('comments — a deleted note stops counting as unsaved once it is saved');
+  {
+    /*
+     * The bug this covers: a save recorded a note's TEXT as saved but never
+     * the fact that it had been removed, so a deleted comment counted as
+     * unsaved for ever. The status bar claimed pending work after a save that
+     * had plainly succeeded, and the unload warning kept firing over it.
+     */
+    withSaveFile(() => ({ ok: true, where: 'saved' }));
+    await QuickEditEditor.save();
+    const floor = QuickEditEditor.status().unsaved;
+
+    const region = QuickEditEditor.addCommentTo(document.getElementById('p2'));
+    writeComment(region, 'temporary note');
+    await QuickEditEditor.save();
+    eq(QuickEditEditor.status().unsaved, floor, 'a new note saves');
+    ok(QuickEditEditor.preview().indexOf('temporary note') !== -1, 'and is in the file');
+
+    QuickEditEditor.removeComment(region);
+    eq(QuickEditEditor.status().unsaved, floor + 1, 'deleting it is an unsaved change');
+
+    await QuickEditEditor.save();
+    eq(QuickEditEditor.status().unsaved, floor,
+       'and saving settles it, rather than counting for ever');
+    ok(QuickEditEditor.preview().indexOf('temporary note') === -1,
+       'the note is gone from the file');
+  }
+
+  heading('comments — moving the switch is itself an unsaved change');
+  {
+    withSaveFile(() => ({ ok: true, where: 'saved' }));
+    await QuickEditEditor.save();
+    const floor = QuickEditEditor.status().unsaved;
+    const inFile = QuickEditEditor.commentRegions().length;
+    ok(inFile > 0, 'there are notes in the file to rewrite');
+
+    QuickEditEditor.setCommentsVisible(true);
+    eq(QuickEditEditor.status().unsaved, floor + inFile,
+       'every note in the file is pending, because every one of them changes');
+
+    QuickEditEditor.setCommentsVisible(false);
+    eq(QuickEditEditor.status().unsaved, floor,
+       'and moving it back means nothing is pending after all');
   }
 
   // Put the editor back the way the rest of the page expects it.

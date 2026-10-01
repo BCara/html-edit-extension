@@ -126,6 +126,10 @@
     lastIsland: null,     // the island the caret was last in, for Insert
     addHideTimer: 0,      // grace period while the pointer crosses to the buttons
     comments: [],         // comment regions, existing and new
+    // Whether a saved comment is written as a visible note or as an HTML
+    // comment no browser shows. Remembered between sessions, because it is a
+    // statement about how someone works rather than about one document.
+    commentsVisible: false,
     rail: null,           // the margin the cards live in
     railRendering: false, // guards the blur fired by rebuilding the cards
     editingComment: null, // the region whose card has focus
@@ -240,6 +244,11 @@
     '.p-input:focus { outline: 2px solid #7c74ff; outline-offset: 0; }',
     '.p-hint { color: #9aa0ad; font-size: 11px; line-height: 1.45; }',
     '.p-sep { height: 1px; background: rgba(255, 255, 255, .12); margin: 2px 0; }',
+    '.p-check {',
+    '  display: flex; align-items: center; gap: 7px;',
+    '  font-weight: 600; cursor: pointer;',
+    '}',
+    '.p-check input { flex: none; margin: 0; accent-color: #d9a01e; cursor: pointer; }',
     '.p-changes { text-align: left; border-radius: 7px; }',
     '.p-ai { display: flex; flex-direction: column; gap: 5px; }',
     '.p-ai .ok { color: #9fe0b5; }',
@@ -1275,6 +1284,19 @@
     '  color: #9a917d; cursor: pointer; padding: 0 2px; border-radius: 3px;',
     '}',
     '.del:hover { background: rgba(0, 0, 0, .07); color: #b91c1c; }',
+    // A reply is the same card, stepped in and tied to the one above it, so a
+    // thread reads as one object in the margin without needing a container.
+    '.card.reply {',
+    '  width: 244px; border-left-color: #c9bda0;',
+    '  border-top-left-radius: 3px;',
+    '}',
+    '.card.reply .who::before { content: "\\21b3\\00a0"; color: #a9a08c; font-weight: 400; }',
+    '.foot { margin-top: 6px; }',
+    '.reply-btn {',
+    '  font: 600 11px/1 system-ui, sans-serif; border: 0; background: transparent;',
+    '  color: #8a7f66; cursor: pointer; padding: 3px 5px; border-radius: 4px;',
+    '}',
+    '.reply-btn:hover { background: rgba(0, 0, 0, .07); color: #4a4133; }',
     'textarea {',
     '  font: inherit; width: 100%; border: 0; padding: 0; margin: 0;',
     '  background: transparent; color: inherit; resize: none; overflow: hidden;',
@@ -1283,13 +1305,71 @@
     'textarea::placeholder { color: #a9a08c; }',
     '@media (prefers-color-scheme: dark) {',
     '  .card { background: #2a2620; color: #ece9e2; border-color: #4a4133; }',
+    '  .card.reply { border-left-color: #6b6250; }',
     '  .who { color: #b8ad93; }',
+    '  .reply-btn { color: #b8ad93; }',
+    '  .reply-btn:hover { background: rgba(255, 255, 255, .12); color: #ece9e2; }',
     '  textarea::placeholder { color: #7d7462; }',
     '}',
   ].join('\n');
 
+  /*
+   * The notes to show, in the order they should be read.
+   *
+   * Document order of the section each one is attached to, and within a
+   * section the order they were written. That is what makes a reply a reply:
+   * nothing in the file marks one, and nothing needs to — a thread is simply
+   * the notes that share a block, oldest first. Writing it this way means a
+   * reply survives being read by anything that knows only what an HTML
+   * comment is.
+   */
   function liveComments() {
-    return state.comments.filter(function (r) { return !r.removed; });
+    var live = state.comments.filter(function (r) { return !r.removed; });
+    var order = new Map();
+    for (var i = 0; i < live.length; i++) order.set(live[i], i);
+
+    return live.sort(function (a, b) {
+      if (a.block !== b.block && a.block && b.block && a.block.compareDocumentPosition) {
+        var rel = a.block.compareDocumentPosition(b.block);
+        if (rel & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (rel & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      }
+      return order.get(a) - order.get(b);
+    });
+  }
+
+  // How many live notes sit on this block, and where this one comes in that
+  // thread. Index 0 opens it; anything after is a reply.
+  function threadIndex(region) {
+    var n = 0;
+    var live = liveComments();
+    for (var i = 0; i < live.length; i++) {
+      if (live[i] === region) return n;
+      if (live[i].block === region.block) n++;
+    }
+    return n;
+  }
+
+  /*
+   * What the file would hold for this note if it were saved right now: its
+   * text, or null when the file would not contain it at all. A note that was
+   * deleted and a note that was emptied both come to the same thing.
+   */
+  function commentWanted(r) {
+    if (r.removed) return null;
+    return r.text.trim() || null;
+  }
+
+  // What the file holds for it now: null when it is not in there.
+  function commentInFile(r) {
+    return r.saved == null ? null : r.saved;
+  }
+
+  // Is this note exactly what the file holds, in the form it will be written?
+  function commentSettled(r) {
+    if (commentWanted(r) !== commentInFile(r)) return false;
+    if (commentInFile(r) === null) return true;
+    return !!r.savedVisible === !!state.commentsVisible;
   }
 
   function commentChangedCount() {
@@ -1297,17 +1377,31 @@
     for (var i = 0; i < state.comments.length; i++) {
       var r = state.comments[i];
       if (r.removed) { if (r.token) n++; continue; }   // a deleted existing comment is a change
-      if (r.text.trim() !== r.original) n++;
+      if (r.text.trim() !== r.original) { n++; continue; }
+      // Same words, written the other way round: showing a note in the
+      // document, or hiding it again, changes the file.
+      if (r.token && !!r.element !== !!state.commentsVisible) n++;
     }
     return n;
   }
 
+  /*
+   * Notes that differ from the file as it was last written.
+   *
+   * Compared against what the file HOLDS rather than against the text the note
+   * was last saved with. Those are not the same thing for a note that was
+   * deleted: it used to count as unsaved for ever, because its text had been
+   * recorded as saved while the fact of its removal never was, so the status
+   * bar claimed unsaved work after a save that had plainly succeeded — and
+   * the unload warning went on firing on a file with nothing left to lose.
+   */
   function commentUnsavedCount() {
     var n = 0;
     for (var i = 0; i < state.comments.length; i++) {
       var r = state.comments[i];
-      if (r.removed) { if (r.token || r.saved) n++; continue; }
-      if (r.text.trim() !== r.saved) n++;
+      if (commentWanted(r) !== commentInFile(r)) { n++; continue; }
+      if (commentInFile(r) === null) continue;
+      if (!!r.savedVisible !== !!state.commentsVisible) n++;
     }
     return n;
   }
@@ -1326,23 +1420,62 @@
    */
   function buildComments() {
     state.comments = [];
+    var found = [];
     var paired = state.map.comments.paired;
 
     for (var i = 0; i < paired.length; i++) {
       var parsed = Comments.parse(paired[i].node.data);
       if (parsed === null) continue;
-      var text = parsed.text;
       var node = paired[i].node;
-      state.comments.push({
-        kind: 'comment',
+      found.push({
         token: paired[i].token,
         node: node,
+        element: null,
         block: node.nextElementSibling || node.parentElement,
-        author: parsed.author,
-        date: parsed.date,
-        text: text,
-        original: text,
-        saved: text,
+        parsed: parsed,
+      });
+    }
+
+    /*
+     * The visible form. Its range in the file is the whole element, start tag
+     * to end tag, which mapping already works out for every element it could
+     * pair with the source. One without both tags is left alone: a note we
+     * cannot find the edges of is one we cannot safely rewrite or remove.
+     */
+    var rendered = doc().querySelectorAll('[' + Comments.RENDERED_ATTR + ']');
+    for (var j = 0; j < rendered.length; j++) {
+      var el = rendered[j];
+      var tags = state.map.elements.get(el);
+      if (!tags || !tags.startTag || !tags.endTag) continue;
+      var fromEl = Comments.parseElement(el);
+      if (fromEl === null) continue;
+      found.push({
+        token: { start: tags.startTag.start, end: tags.endTag.end },
+        node: null,
+        element: el,
+        block: el.nextElementSibling || el.parentElement,
+        parsed: fromEl,
+      });
+    }
+
+    // Source order, so a thread reads in the order it was written whichever
+    // form each note happens to be in.
+    found.sort(function (a, b) { return a.token.start - b.token.start; });
+
+    for (var k = 0; k < found.length; k++) {
+      var f = found[k];
+      state.comments.push({
+        kind: 'comment',
+        token: f.token,
+        node: f.node,
+        element: f.element,
+        block: f.block,
+        author: f.parsed.author,
+        date: f.parsed.date,
+        text: f.parsed.text,
+        original: f.parsed.text,
+        saved: f.parsed.text,
+        savedVisible: !!f.element,
         removed: false,
         anchor: null,
         card: null,
@@ -1366,12 +1499,14 @@
       kind: 'comment',
       token: null,
       node: null,
+      element: null,
       block: block,
       author: authorName(),
       date: Comments.today(),
       text: '',
       original: '',
-      saved: '',
+      saved: null,            // not in the file at all until it is written
+      savedVisible: false,
       removed: false,
       anchor: anchor,
       card: null,
@@ -1382,6 +1517,33 @@
     renderRail(region);
     refresh();
     return region;
+  }
+
+  /*
+   * Move the switch. Nothing is written here — the next save is what rewrites
+   * the file — but every note that is in it immediately counts as unsaved, so
+   * the status bar and the margin say straight away that a save is pending
+   * rather than letting a toggle look like it did nothing.
+   */
+  function setCommentsVisible(next) {
+    next = !!next;
+    if (next === state.commentsVisible) return;
+    state.commentsVisible = next;
+    if (state.ui && state.ui.showComments) state.ui.showComments.checked = next;
+    if (state.settings) {
+      Promise.resolve(state.settings.set('commentsVisible', next)).catch(function () {});
+    }
+    renderRail();
+    refresh();
+
+    var n = state.comments.filter(function (r) {
+      return commentInFile(r) !== null;
+    }).length;
+    flash(next
+      ? (n ? 'Comments will be visible in the file — save to rewrite ' + n + ' of them'
+           : 'Comments will be saved as visible notes')
+      : (n ? 'Comments will be hidden again — save to rewrite ' + n + ' of them'
+           : 'Comments will be saved as HTML comments, which no browser shows'));
   }
 
   function setCommentRemoved(region, removed) {
@@ -1515,12 +1677,18 @@
     clearHighlights();
 
     regions.forEach(function (region) {
+      var isReply = threadIndex(region) > 0;
       var card = doc().createElement('div');
-      card.className = 'card' + (region.text.trim() === region.saved ? '' : ' unsaved');
+      card.className = 'card' + (commentSettled(region) ? '' : ' unsaved') +
+        (isReply ? ' reply' : '');
       card.innerHTML =
         '<div class="head"><span class="who"></span>' +
         '<button class="del" title="Delete this comment">&times;</button></div>' +
-        '<textarea rows="1" placeholder="Write a comment…"></textarea>';
+        '<textarea rows="1" placeholder="' +
+          (isReply ? 'Write a reply…' : 'Write a comment…') + '"></textarea>' +
+        '<div class="foot">' +
+          '<button class="reply-btn" title="Add a reply to this thread">Reply</button>' +
+        '</div>';
 
       // Whoever the note says wrote it; a new one is the current user's until
       // it is saved.
@@ -1534,7 +1702,7 @@
       textarea.addEventListener('input', function () {
         region.text = textarea.value;
         autoGrow(textarea);
-        card.className = 'card' + (region.text.trim() === region.saved ? '' : ' unsaved');
+        card.className = 'card' + (commentSettled(region) ? '' : ' unsaved');
         positionCards();
         refresh();
       });
@@ -1552,6 +1720,12 @@
         if (region.block && region.block.removeAttribute) region.block.removeAttribute(ACTIVE_ATTR);
       });
       card.querySelector('.del').addEventListener('click', function () { removeComment(region); });
+      // A reply is another note on the same section. Nothing in the file says
+      // so; it is a reply because it sits in the same thread, which is what
+      // keeps the format something a text editor can still make sense of.
+      card.querySelector('.reply-btn').addEventListener('click', function () {
+        addCommentTo(region.block);
+      });
 
       rail.list.appendChild(card);
       region.card = card;
@@ -1657,6 +1831,16 @@
           '<div class="p-hint">Shown on your comments and in the list of changes. ' +
             'It is whatever you type here, not a sign-in, so anyone can use any name.</div>' +
           '<div class="p-sep"></div>' +
+          '<label class="p-check">' +
+            '<input type="checkbox" class="p-show-comments">' +
+            'Show comments in the document' +
+          '</label>' +
+          '<div class="p-hint">Off, a comment is an HTML comment: it travels inside ' +
+            'the file, but no browser displays it. On, it is saved as a visible note ' +
+            'anyone can read without Quick Edit. Either way the words, the name and ' +
+            'the date are the same, so the switch can be moved back and forth. It ' +
+            'rewrites every comment in the file the next time you save.</div>' +
+          '<div class="p-sep"></div>' +
           '<button class="p-changes">Show changes</button>' +
           '<div class="p-sep"></div>' +
           '<div class="p-ai"></div>' +
@@ -1683,7 +1867,12 @@
       authorSave: shadow.querySelector('.p-save'),
       changesBtn: shadow.querySelector('.p-changes'),
       moreAI: shadow.querySelector('.p-ai'),
+      showComments: shadow.querySelector('.p-show-comments'),
     };
+    ui.showComments.checked = !!state.commentsVisible;
+    ui.showComments.addEventListener('change', function () {
+      setCommentsVisible(ui.showComments.checked);
+    });
     // mousedown, not click: by click time the caret has already left the text
     // the user was editing, and undo would restore it somewhere they cannot see.
     // mousedown with the default prevented, so opening the menu does not pull
@@ -2636,6 +2825,13 @@
    * A comment left empty is treated as no comment: a new one is never written,
    * and an existing one emptied out is removed.
    */
+  // Whichever form the switch currently says, for every note being written.
+  function commentMarkup(text, indent, newline, meta) {
+    return state.commentsVisible
+      ? Comments.renderedMarkup(text, indent, newline, meta)
+      : Comments.markup(text, indent, newline, meta);
+  }
+
   function collectCommentEdits(edits) {
     var newline = Blocks.newlineOf(state.source);
 
@@ -2652,13 +2848,17 @@
       if (!text) continue;                           // a new one, never written in
 
       if (region.token) {
-        if (text === region.original) continue;      // untouched
+        // Untouched text is still a rewrite when the switch has moved: that is
+        // exactly what turning notes on and off means, and it is the one case
+        // where a save changes a line nobody typed in.
+        var wasVisible = !!region.element;
+        if (text === region.original && wasVisible === !!state.commentsVisible) continue;
         // An edited note keeps the attribution it came with: it is still that
         // person's comment, and re-signing it would claim otherwise.
         edits.push({
           start: region.token.start,
           end: region.token.end,
-          replacement: Comments.markup(
+          replacement: commentMarkup(
             text, Blocks.indentOf(state.source, region.token.start), newline,
             { author: region.author, date: region.date }),
         });
@@ -2671,7 +2871,7 @@
         // Attributed only once the user has given a name. Someone who never
         // touches the feature gets exactly the plain comment they always did,
         // rather than a date stamped on every note they write.
-        replacement: Comments.markup(text, region.anchor.indent, newline,
+        replacement: commentMarkup(text, region.anchor.indent, newline,
           (region.author || authorName())
             ? { author: region.author || authorName(), date: region.date || Comments.today() }
             : null) +
@@ -2847,7 +3047,11 @@
     // Captured now, applied on success: the user can keep typing while the
     // save dialog is open.
     var snapshot = state.regions.map(function (r) { return { region: r, value: r.current }; })
-      .concat(state.comments.map(function (r) { return { region: r, value: r.text.trim() }; }));
+      .concat(state.comments.map(function (r) {
+        // null where the file will not hold this note at all, so a deletion is
+        // recorded as having been saved rather than only its text.
+        return { region: r, value: commentWanted(r), visible: !!state.commentsVisible };
+      }));
     var skipped = emptyAddedCount() + emptyCommentCount();
 
     var toServer = !!(state.served && state.served.canPut);
@@ -2877,7 +3081,12 @@
           : 'Save failed: ' + ((res && res.message) || 'unknown error'));
         return;
       }
-      for (var i = 0; i < snapshot.length; i++) snapshot[i].region.saved = snapshot[i].value;
+      for (var i = 0; i < snapshot.length; i++) {
+        snapshot[i].region.saved = snapshot[i].value;
+        if (snapshot[i].region.kind === 'comment') {
+          snapshot[i].region.savedVisible = snapshot[i].visible;
+        }
+      }
       renderRail();
       refresh();
 
@@ -2949,6 +3158,11 @@
         renderMore();
         renderRail();
       }).catch(function () { /* no stored name is fine */ });
+      Promise.resolve(state.settings.get('commentsVisible')).then(function (on) {
+        state.commentsVisible = !!on;
+        if (state.ui && state.ui.showComments) state.ui.showComments.checked = !!on;
+        refresh();
+      }).catch(function () { /* the default is off */ });
     }
     // A host that owns saving supplies this: text -> Promise<{ok, where}>. The
     // web app writes through a file handle, shares, or downloads, and knows
@@ -3012,6 +3226,8 @@
     removeComment: removeComment,
     commentRegions: liveComments,
     setActive: setActive,
+    setCommentsVisible: setCommentsVisible,
+    commentsVisible: function () { return state.commentsVisible; },
     isActive: function () { return state.active; },
     status: status,
     save: save,

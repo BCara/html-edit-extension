@@ -27,6 +27,27 @@
  * verified — so it says who claims to have written a note, which is what a
  * team that trusts each other needs, and no more. The plain form without
  * brackets is still read, so notes from before authorship existed keep working.
+ *
+ * SHOWING THEM
+ * ------------
+ * A comment that no browser displays is the right default — the document looks
+ * exactly as it did before anyone annotated it — but it is the wrong default
+ * for someone who wants to read their own notes without this extension. So a
+ * comment has a second form, carrying the same three fields:
+ *
+ *     <div data-qe-comment="Cara · 2026-10-01" style="…">Cara · 2026-10-01: needs a figure for Q3</div>
+ *     <p>Revenue grew by 12% over the quarter.</p>
+ *
+ * The attribute is the record and the text is the display, written from each
+ * other so they cannot disagree. Every style is inline, so the note looks the
+ * same in a file sent to someone who has no stylesheet, no network and no idea
+ * what Quick Edit is.
+ *
+ * Both forms are read, always. Which one is WRITTEN is a single switch in the
+ * editor, so turning it on rewrites every note in the file into the visible
+ * form and turning it off puts them all back. Nothing is lost either way:
+ * the text, the name and the date survive the round trip, which is the only
+ * reason it is safe to offer as a toggle rather than a conversion.
  */
 (function (root) {
   'use strict';
@@ -115,6 +136,93 @@
     return '<!-- comment' + attribution(meta) + ': ' + body + ' -->';
   }
 
+  // --- the visible form -------------------------------------------------------
+
+  var RENDERED_ATTR = 'data-qe-comment';
+
+  /*
+   * Inline, because this has to survive being emailed to someone who will open
+   * it with no stylesheet and no network. The amber matches the comment button
+   * and the margin card, so a note looks like the same object in all three
+   * places. normal font-style on the name stops the whole thing reading as one
+   * run of italics.
+   */
+  var RENDERED_STYLE = [
+    'margin:.7em 0',
+    'padding:.5em .8em',
+    'border-left:3px solid #d9a01e',
+    'background:#fdf6e6',
+    'color:#4a4133',
+    // Single quotes: this whole string goes inside a double-quoted style
+    // attribute, and "Segoe UI" would end the attribute at the S.
+    "font:italic 14px/1.5 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif",
+    'white-space:pre-wrap',
+  ].join(';');
+
+  // What the reader sees: "Cara · 2026-10-01: the note", or just the note when
+  // there is nobody to attribute it to.
+  function renderedText(text, meta) {
+    var who = attribution(meta).replace(/^ \[|\]$/g, '');
+    return who ? who + ': ' + text : text;
+  }
+
+  /*
+   * The same note as an element a browser will actually show.
+   *
+   * The body is escaped for text content and the attribution for an attribute
+   * value; neither can carry markup out of a comment and into the document,
+   * which matters because the text came from a person typing into a box.
+   */
+  function renderedMarkup(text, indent, newline, meta) {
+    var body = String(text).replace(/\r\n?/g, '\n');
+    var who = attribution(meta).replace(/^ \[|\]$/g, '');
+    return '<div ' + RENDERED_ATTR + '="' + escapeAttr(who) + '"' +
+           ' style="' + RENDERED_STYLE + '">' +
+           escapeText(renderedText(body, meta)) +
+           '</div>';
+  }
+
+  function escapeText(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function escapeAttr(s) {
+    return escapeText(s).replace(/"/g, '&quot;');
+  }
+
+  function isRendered(el) {
+    return !!(el && el.nodeType === 1 && el.hasAttribute && el.hasAttribute(RENDERED_ATTR));
+  }
+
+  /*
+   * A visible note pulled back apart: { text, author, date }, in the same shape
+   * parse() returns for the hidden form.
+   *
+   * The attribute is believed over the text, because the text is a rendering of
+   * it. The rendered prefix is stripped when it is there and left alone when it
+   * is not, so a note somebody retyped by hand still reads as its own body
+   * rather than losing its first few words.
+   */
+  function parseElement(el) {
+    if (!isRendered(el)) return null;
+    var who = (el.getAttribute(RENDERED_ATTR) || '').trim();
+    var text = (el.textContent || '').replace(/\r\n?/g, '\n');
+
+    if (who && text.slice(0, who.length + 2) === who + ': ') {
+      text = text.slice(who.length + 2);
+    }
+
+    var author = null, date = null;
+    if (who) {
+      var bits = who.split('\u00b7').map(function (b) { return b.trim(); });
+      if (bits.length > 1 && /^\d{4}-\d{2}-\d{2}$/.test(bits[bits.length - 1])) {
+        date = bits.pop();
+      }
+      author = bits.join(' \u00b7 ') || null;
+    }
+    return { text: text.replace(/\s+$/, ''), author: author, date: date };
+  }
+
   // Today, as the brackets record it: local date, not UTC, since the person
   // writing the note means their own today.
   function today(now) {
@@ -161,6 +269,10 @@
 
   root.QuickEditComments = {
     parse: parse,
+    RENDERED_ATTR: RENDERED_ATTR,
+    renderedMarkup: renderedMarkup,
+    parseElement: parseElement,
+    isRendered: isRendered,
     cleanName: cleanName,
     today: today,
     textOf: textOf,
