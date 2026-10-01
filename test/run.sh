@@ -64,7 +64,7 @@ run_page() {
     --virtual-time-budget=30000 \
     --dump-dom "file://$DIR/test/$page" > "$dom" 2>"$WORK/chrome.log"
 
-  node "$DIR/test/extract-results.js" "$dom"
+  node "$DIR/test/extract-results.js" "$dom" "test/$page"
   local status=$?
 
   if [ "$status" -eq 2 ]; then
@@ -116,7 +116,7 @@ timeout 60 "$CHROME" --headless=new --disable-gpu --no-sandbox \
   > "$WORK/app.dom.html" 2>"$WORK/app.log" || true
 kill $SERVER_PID 2>/dev/null || true
 
-node "$DIR/test/extract-results.js" "$WORK/app.dom.html" || APP_FAIL=1
+node "$DIR/test/extract-results.js" "$WORK/app.dom.html" "app/test/app-test.html" || APP_FAIL=1
 
 echo
 if [ -n "${BROWSER_FAIL:-}" ] || [ -n "${NODE_FAIL:-}" ] || [ -n "${APP_FAIL:-}" ]; then
