@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.9.1';
+  var VERSION = '0.10.0';
   var REQUIRED = [
     'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
     'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
@@ -72,7 +72,8 @@
     // Set only when the user chose the file through showOpenFilePicker, which
     // is the one route that can also write to it. See saveThroughHandle().
     handle: null,
-    writesInPlace: false,   // reported to the popup, so it can say so
+    writesInPlace: false,   // a handle is in hand: Save overwrites silently
+    canWriteFile: false,    // Save can write, once it has asked where
   };
 
   function send(message) {
@@ -265,31 +266,68 @@
    * before — the saved edits are never riding on this working.
    */
   function saveThroughHandle() {
-    if (!state.handle) return Promise.resolve(null);
+    // A served document writes back over HTTP; the handle has no part in it.
+    if (isServed()) return Promise.resolve(null);
+    if (!state.handle) return Promise.resolve(Prompt.canHandle ? writeFn() : null);
     return Prompt.canWrite(state.handle).then(function (allowed) {
       if (!allowed) {
-        console.log('[Quick Edit] the file handle is read-only; Save will download instead');
+        console.log('[Quick Edit] the file handle is read-only; Save will ask for one');
         state.handle = null;
-        return null;
       }
-      return function (text) {
-        return Prompt.writeThrough(state.handle, text)
-          .then(function () {
-            return { ok: true, where: 'Saved over ' + filename() };
-          })
-          .catch(function (err) {
-            // Losing the handle mid-session — the file moved, the permission
-            // lapsed — must not lose the edits with it. fallback:true tells the
-            // editor to download instead of reporting a dead end.
-            console.warn('[Quick Edit] writing through the handle failed:', err);
-            state.handle = null;
-            return {
-              ok: false,
-              fallback: true,
-              message: err && err.message || String(err),
-            };
-          });
-      };
+      return writeFn();
+    });
+  }
+
+  /*
+   * Save, through a handle, asking for one the first time if we do not have it.
+   *
+   * The ask is deferred on purpose. When the file was read by the service
+   * worker there was no picker at open time, and interrupting someone before
+   * they have typed a word to arrange something they have not asked for yet is
+   * the wrong moment. By the time they press Save they have decided the file
+   * matters, and a save dialog is what they would have got anyway — except
+   * this one is the LAST one, because the handle is kept for the session.
+   */
+  function writeFn() {
+    return function (text) {
+      return ensureHandle().then(function (handle) {
+        if (!handle) {
+          // Cancelled. Not a failure, and deliberately not a fallback: nobody
+          // who just dismissed a save dialog wants the file downloaded anyway.
+          return { ok: false, message: 'Save cancelled' };
+        }
+        return Prompt.writeThrough(handle, text).then(function () {
+          return { ok: true, where: 'Saved over ' + filename() };
+        });
+      }).catch(function (err) {
+        // Losing the handle mid-session — the file moved, the permission
+        // lapsed — must not lose the edits with it. fallback:true tells the
+        // editor to download instead of reporting a dead end.
+        console.warn('[Quick Edit] writing through the handle failed:', err);
+        state.handle = null;
+        return { ok: false, fallback: true, message: err && err.message || String(err) };
+      });
+    };
+  }
+
+  // The handle we already have, or one the user picks now. Null if they
+  // cancel, which is an answer rather than an error.
+  function ensureHandle() {
+    if (state.handle) {
+      return Prompt.canWrite(state.handle).then(function (allowed) {
+        if (allowed) return state.handle;
+        state.handle = null;
+        return askForHandle();
+      });
+    }
+    return askForHandle();
+  }
+
+  function askForHandle() {
+    return Prompt.saveAs(filename()).then(function (handle) {
+      state.handle = handle;
+      state.writesInPlace = !!handle;
+      return handle;
     });
   }
 
@@ -382,17 +420,23 @@
         Editor.init({
           source: source, map: map, filename: filename(), served: state.served,
           settings: SETTINGS,
-          // null unless the user chose the file through the picker, in which
-          // case Save writes over the top of it instead of downloading a copy.
+          // Non-null whenever this browser can write a file at all: Save then
+          // writes over the top of the file rather than downloading a copy,
+          // asking once for somewhere to write if it does not already know.
           saveFile: saveFile,
         });
         return saveFile;
       }).then(function (saveFile) {
-        state.writesInPlace = !!saveFile;
+        // Whether Save CAN write the file. Whether it already knows which file
+        // is state.handle, and that may only be answered at the first save.
+        state.canWriteFile = !!saveFile;
+        state.writesInPlace = !!state.handle;
         state.ready = true;
         console.log('[Quick Edit] read via ' + state.readVia + ' —',
                     map.stats.editable, 'editable regions', map.stats,
-                    state.writesInPlace ? '— Save writes over the file' : '');
+                    state.writesInPlace ? '— Save writes over the file'
+                      : state.canWriteFile ? '— Save will ask once where to write'
+                      : '');
         return state;
       });
     });
@@ -412,6 +456,7 @@
       reasons: reasons,
       readVia: state.readVia,
       writeBack: state.writesInPlace ? 'file'
+        : state.canWriteFile ? 'file-ask'
         : state.served ? (state.served.canPut ? 'server' : 'download') : 'download',
       editor: Editor.status(),
     };

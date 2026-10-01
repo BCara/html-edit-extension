@@ -47,18 +47,20 @@
     '.error { color: #ff9f9f; margin-top: 8px; }',
     '.error:empty { display: none; }',
     '.row { display: flex; gap: 8px; margin-top: 12px; align-items: stretch; }',
+
     'button {',
     '  font: inherit; border: 0; border-radius: 7px; padding: 6px 13px;',
     '  cursor: pointer; background: rgba(255, 255, 255, .13); color: inherit;',
     '}',
-    // Still clipped rather than allowed to push the row off the side, as a
-    // backstop for any caller that passes a long label — but the label is now
-    // a fixed phrase, so in practice there is nothing to clip.
-    '.go {',
-    '  flex: 1 1 auto; min-width: 0;',
-    '  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;',
-    '}',
-    '.cancel { flex: none; }',
+    // The label WRAPS rather than clipping. Clipping it was a mistake twice
+    // over: a squeezed button turned "Choose DIGISTAYBOOK_…" into "Choo", and
+    // then "Choose this file" into "Ch". Two letters and an ellipsis is not a
+    // label, and the failure is silent — nothing says the button is lying
+    // about what it does. A wrapped label is uglier on a narrow card and
+    // always readable, which is the right way round.
+    '.row { flex-wrap: wrap; }',
+    '.go { flex: 1 1 130px; white-space: normal; text-align: center; }',
+    '.cancel { flex: 0 1 auto; }',
     'button:hover { background: rgba(255, 255, 255, .22); }',
     'button.primary { background: #5b52f0; }',
     'button.primary:hover { background: #6d64ff; }',
@@ -212,6 +214,25 @@
       .catch(function () { return false; });
   }
 
+  /*
+   * Ask for somewhere to write, defaulting to the file being edited.
+   *
+   * Picking the same file is the point — that is what "save over the top"
+   * means — so the name is pre-filled and the user only has to confirm.
+   * Resolves with null if they cancel, which is an answer, not a failure.
+   */
+  function saveAs(suggestedName) {
+    if (typeof window.showSaveFilePicker !== 'function') return Promise.resolve(null);
+    return window.showSaveFilePicker({
+      suggestedName: suggestedName,
+      types: PICKER_TYPES,
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') return null;
+      console.log('[Quick Edit] the save picker would not give a handle:', err);
+      return null;
+    });
+  }
+
   function writeThrough(handle, text) {
     return handle.createWritable().then(function (writable) {
       return writable.write(new Blob([text], { type: 'text/html;charset=utf-8' }))
@@ -221,6 +242,7 @@
 
   root.QuickEditPrompt = {
     chooseFile: chooseFile,
+    saveAs: saveAs,
     canWrite: canWrite,
     writeThrough: writeThrough,
     canHandle: CAN_HANDLE,
