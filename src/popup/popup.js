@@ -53,6 +53,7 @@ const READ_LABELS = {
 
 // Where Save will put it. Worth stating up front: these are different acts.
 const WRITE_LABELS = {
+  file: 'over the top of the file you chose',
   server: 'back to the server, in place',
   download: 'a download you place yourself',
 };

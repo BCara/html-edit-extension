@@ -69,6 +69,10 @@
     readError: null,  // why the earlier ones did not
     served: null,     // for an http(s) document: how to write it back
     reading: null,    // the in-flight read, so two messages cannot start two
+    // Set only when the user chose the file through showOpenFilePicker, which
+    // is the one route that can also write to it. See saveThroughHandle().
+    handle: null,
+    writesInPlace: false,   // reported to the popup, so it can say so
   };
 
   function send(message) {
@@ -242,7 +246,11 @@
     return Prompt.chooseFile({
       title: 'Quick Edit needs to read this file',
       body: 'Chrome will not let an extension open a local file on its own. ' +
-            'Choose this same file and Quick Edit can get to work.',
+            'Choose this same file and Quick Edit can get to work.' +
+            (Prompt.canHandle
+              ? ' Saving will then write straight back to it, rather than '
+                + 'downloading a copy.'
+              : ''),
       action: 'Choose ' + wanted,
       validate: function (file) {
         if (file.name.toLowerCase() !== wanted.toLowerCase()) {
@@ -250,11 +258,57 @@
         }
         return null;
       },
-    }).then(function (file) {
-      return file.text();
+    }).then(function (chosen) {
+      // Held for saving. A file chosen this way can be written back to, so the
+      // click the user has just spent is worth more than one read.
+      state.handle = chosen.handle;
+      return chosen.file.text();
     }).then(function (text) {
       state.readVia = 'file picker';
       return text;
+    });
+  }
+
+  /*
+   * Saving over the top of the file the user opened.
+   *
+   * This exists only on the picker route, and that is not a limitation anyone
+   * chose: Chrome will not let an extension open a local file by itself, and
+   * it will not let one write to a local file either. What it does allow is a
+   * handle the user granted by hand. So the prompt that used to cost a click
+   * and buy a single read now buys writing as well, and Save stops meaning
+   * "download another copy to the Downloads folder".
+   *
+   * Returns null when there is no handle or the browser will not grant write
+   * permission, and the editor then falls back to the download exactly as
+   * before — the saved edits are never riding on this working.
+   */
+  function saveThroughHandle() {
+    if (!state.handle) return Promise.resolve(null);
+    return Prompt.canWrite(state.handle).then(function (allowed) {
+      if (!allowed) {
+        console.log('[Quick Edit] the file handle is read-only; Save will download instead');
+        state.handle = null;
+        return null;
+      }
+      return function (text) {
+        return Prompt.writeThrough(state.handle, text)
+          .then(function () {
+            return { ok: true, where: 'Saved over ' + filename() };
+          })
+          .catch(function (err) {
+            // Losing the handle mid-session — the file moved, the permission
+            // lapsed — must not lose the edits with it. fallback:true tells the
+            // editor to download instead of reporting a dead end.
+            console.warn('[Quick Edit] writing through the handle failed:', err);
+            state.handle = null;
+            return {
+              ok: false,
+              fallback: true,
+              message: err && err.message || String(err),
+            };
+          });
+      };
     });
   }
 
@@ -343,15 +397,24 @@
 
       state.source = source;
       state.map = map;
-      Editor.init({
-        source: source, map: map, filename: filename(), served: state.served,
-        settings: SETTINGS,
-        ai: AI_BRIDGE,
+      return saveThroughHandle().then(function (saveFile) {
+        Editor.init({
+          source: source, map: map, filename: filename(), served: state.served,
+          settings: SETTINGS,
+          ai: AI_BRIDGE,
+          // null unless the user chose the file through the picker, in which
+          // case Save writes over the top of it instead of downloading a copy.
+          saveFile: saveFile,
+        });
+        return saveFile;
+      }).then(function (saveFile) {
+        state.writesInPlace = !!saveFile;
+        state.ready = true;
+        console.log('[Quick Edit] read via ' + state.readVia + ' —',
+                    map.stats.editable, 'editable regions', map.stats,
+                    state.writesInPlace ? '— Save writes over the file' : '');
+        return state;
       });
-      state.ready = true;
-      console.log('[Quick Edit] read via ' + state.readVia + ' —',
-                  map.stats.editable, 'editable regions', map.stats);
-      return state;
     });
   }
 
@@ -368,7 +431,8 @@
       stats: state.map.stats,
       reasons: reasons,
       readVia: state.readVia,
-      writeBack: state.served ? (state.served.canPut ? 'server' : 'download') : 'download',
+      writeBack: state.writesInPlace ? 'file'
+        : state.served ? (state.served.canPut ? 'server' : 'download') : 'download',
       editor: Editor.status(),
     };
     if (extra) for (var k in extra) out[k] = extra[k];

@@ -2813,6 +2813,24 @@
     return Splice.applyEdits(state.source, collectEdits());
   }
 
+  /*
+   * Saving through the host — the web app's file handle, or the extension's.
+   *
+   * A host that turns out not to be able to write says so with fallback:true,
+   * and the download catches the edits. Cancelling a dialog is deliberately
+   * not that: downloading a file somebody just declined to save would be the
+   * opposite of what they asked for.
+   */
+  function hostSave(text) {
+    return Promise.resolve(state.saveFile(text)).then(function (res) {
+      if (!res || res.ok || !res.fallback) return res;
+      return requestDownload(text).then(function (dl) {
+        if (!dl || !dl.ok) return dl;
+        return { ok: true, where: 'Could not write to the file — downloaded ' + state.filename + ' instead' };
+      });
+    });
+  }
+
   function save() {
     if (!state.regions.length) { flash('Nothing to save'); return Promise.resolve(); }
 
@@ -2835,7 +2853,7 @@
     var toServer = !!(state.served && state.served.canPut);
     flash(state.saveFile ? 'Saving…' : (toServer ? 'Saving to the server…' : 'Saving…'));
 
-    var attempt = state.saveFile ? Promise.resolve(state.saveFile(text)) : toServer
+    var attempt = state.saveFile ? hostSave(text) : toServer
       ? saveToServer(text).then(function (res) {
           if (res.ok || res.conflict) return res;
           // The server said no. Do not lose the edits over it — fall back to

@@ -922,6 +922,80 @@ async function run() {
        'the file has the page\'s blocks, less the empty ones it declines to write');
   }
 
+  // --- saving through a host that owns the file -----------------------------
+
+  /*
+   * The extension's picker route and the web app both hand the editor a
+   * saveFile(). What matters is not that it works — it is what happens when it
+   * does not, because by then the user has edits on screen and nowhere to put
+   * them. Re-init only replaces saveFile; the regions built at the top of this
+   * suite are left alone.
+   */
+  function withSaveFile(fn) {
+    const calls = [];
+    QuickEditEditor.init({
+      source: SOURCE, map, filename: 'editor-test.html',
+      saveFile: (text) => { calls.push(text); return fn(text); },
+    });
+    return calls;
+  }
+
+  heading('saving — a host that writes the file keeps the edits');
+  {
+    const island = islandFor('#p3');
+    const calls = withSaveFile(() => ({ ok: true, where: 'Saved over editor-test.html' }));
+
+    // Settle first. Every heading above has edited this page, so the only
+    // honest baseline is whatever remains once a save has been allowed to
+    // succeed — and the count is then measured as a change from it.
+    await QuickEditEditor.save();
+    const floor = QuickEditEditor.status().unsaved;
+
+    typeInto(island, 'Written. ', 0);
+    eq(QuickEditEditor.status().unsaved, floor + 1, 'there is something to save');
+
+    await QuickEditEditor.save();
+    eq(calls.length, 2, 'the host was asked to write the file');
+    ok(calls[1].indexOf('Written. ') !== -1, 'and was given the edited file');
+    eq(QuickEditEditor.status().unsaved, floor, 'the edit counts as saved');
+  }
+
+  heading('saving — a host that cannot write falls back to the download');
+  {
+    const island = islandFor('#p3');
+    const calls = withSaveFile(() => ({
+      ok: false, fallback: true, message: 'the handle went away',
+    }));
+    const floor = QuickEditEditor.status().unsaved;
+
+    typeInto(island, 'Rescued. ', 0);
+    eq(QuickEditEditor.status().unsaved, floor + 1, 'there is something to save');
+
+    await QuickEditEditor.save();
+    eq(calls.length, 1, 'the host was asked first');
+    eq(QuickEditEditor.status().unsaved, floor,
+       'and the download caught the edit rather than losing it');
+  }
+
+  heading('saving — a refusal without fallback keeps the edits on screen');
+  {
+    // Cancelling a save dialog is a refusal, not a failure. Downloading the
+    // file anyway would be the opposite of what the user just asked for, so
+    // the edit stays unsaved and visibly so.
+    const island = islandFor('#p3');
+    const calls = withSaveFile(() => ({ ok: false, message: 'cancelled' }));
+    const floor = QuickEditEditor.status().unsaved;
+
+    typeInto(island, 'Kept. ', 0);
+    await QuickEditEditor.save();
+    eq(calls.length, 1, 'the host was asked');
+    eq(QuickEditEditor.status().unsaved, floor + 1,
+       'nothing was marked saved, and nothing was downloaded behind the user');
+  }
+
+  // Put the editor back the way the rest of the page expects it.
+  QuickEditEditor.init({ source: SOURCE, map, filename: 'editor-test.html' });
+
   Report.finish();
 }
 

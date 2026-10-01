@@ -102,11 +102,29 @@
     return current;
   }
 
+  // showOpenFilePicker is the better of the two ways to ask, because what it
+  // hands back is a handle rather than a snapshot — see chooseFile(). It needs
+  // a secure context, which a file:// page is, and it does not exist in
+  // Firefox or Safari, where the input is the only way.
+  var CAN_HANDLE = typeof window.showOpenFilePicker === 'function';
+
+  var PICKER_TYPES = [{
+    description: 'HTML document',
+    accept: { 'text/html': ['.html', '.htm', '.xhtml'] },
+  }];
+
   /*
    * Ask the user to choose a file, and keep asking until they pick one that
    * `validate` accepts or they cancel.
    *
-   * The file input is clicked from inside the button's own click handler, which
+   * Resolves with { file, handle }. The handle is the point of this: a file
+   * chosen through showOpenFilePicker can be WRITTEN BACK TO, so the one click
+   * the user spends proving they meant to open this file also buys saving over
+   * the top of it for the rest of the session. The old file input gives only a
+   * read-only snapshot, which is why saving used to mean a download every time.
+   * It is still the fallback, and handle is null there.
+   *
+   * Either picker is opened from inside the button's own click handler, which
    * is what keeps the browser's user-activation requirement satisfied.
    */
   function chooseFile(options) {
@@ -115,10 +133,39 @@
       var input = ui.shadow.querySelector('input[type=file]');
       var errorEl = ui.shadow.querySelector('.error');
 
-      ui.shadow.querySelector('.go').addEventListener('click', function () {
-        errorEl.textContent = '';
+      // Shared by both routes: validate, and only then take the card down.
+      function offer(file, handle) {
+        return Promise.resolve(options.validate ? options.validate(file) : null)
+          .then(function (problem) {
+            if (problem) { errorEl.textContent = problem; return; }
+            dismiss();
+            resolve({ file: file, handle: handle || null });
+          })
+          .catch(function (err) { errorEl.textContent = String(err && err.message || err); });
+      }
+
+      function viaInput() {
         input.value = '';        // so re-picking the same file still fires change
         input.click();
+      }
+
+      ui.shadow.querySelector('.go').addEventListener('click', function () {
+        errorEl.textContent = '';
+        if (!CAN_HANDLE) { viaInput(); return; }
+
+        window.showOpenFilePicker({ types: PICKER_TYPES, multiple: false })
+          .then(function (handles) {
+            var handle = handles[0];
+            return handle.getFile().then(function (file) { return offer(file, handle); });
+          })
+          .catch(function (err) {
+            // AbortError is the user closing the picker, which is not an error
+            // and must not look like one. Anything else means this browser
+            // would not do it, so fall back rather than strand them.
+            if (err && err.name === 'AbortError') return;
+            console.log('[Quick Edit] the file picker would not give a handle:', err);
+            viaInput();
+          });
       });
 
       ui.shadow.querySelector('.cancel').addEventListener('click', function () {
@@ -128,17 +175,44 @@
 
       input.addEventListener('change', function () {
         var file = input.files && input.files[0];
-        if (!file) return;
-        Promise.resolve(options.validate ? options.validate(file) : null)
-          .then(function (problem) {
-            if (problem) { errorEl.textContent = problem; return; }
-            dismiss();
-            resolve(file);
-          })
-          .catch(function (err) { errorEl.textContent = String(err && err.message || err); });
+        if (file) offer(file, null);
       });
     });
   }
 
-  root.QuickEditPrompt = { chooseFile: chooseFile, dismiss: dismiss };
+  /*
+   * Can this handle actually be written to?
+   *
+   * Asking is the only way to find out: the API exists on a file:// page, but
+   * whether Chrome will grant write permission to a local file chosen there is
+   * its decision, not ours, and it may change between versions. queryPermission
+   * first so an already-granted handle does not re-prompt.
+   */
+  function canWrite(handle) {
+    if (!handle || typeof handle.createWritable !== 'function') return Promise.resolve(false);
+    if (typeof handle.queryPermission !== 'function') return Promise.resolve(true);
+    return handle.queryPermission({ mode: 'readwrite' })
+      .then(function (statePermission) {
+        if (statePermission === 'granted') return true;
+        if (statePermission === 'denied') return false;
+        return handle.requestPermission({ mode: 'readwrite' })
+          .then(function (asked) { return asked === 'granted'; });
+      })
+      .catch(function () { return false; });
+  }
+
+  function writeThrough(handle, text) {
+    return handle.createWritable().then(function (writable) {
+      return writable.write(new Blob([text], { type: 'text/html;charset=utf-8' }))
+        .then(function () { return writable.close(); });
+    });
+  }
+
+  root.QuickEditPrompt = {
+    chooseFile: chooseFile,
+    canWrite: canWrite,
+    writeThrough: writeThrough,
+    canHandle: CAN_HANDLE,
+    dismiss: dismiss,
+  };
 })(typeof self !== 'undefined' ? self : globalThis);
