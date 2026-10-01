@@ -74,21 +74,13 @@ YOUR NAME, AND WHAT CHANGED
 
 Add your name once and it goes on the comments you leave. A list of changes shows everything Save would write, paragraph by paragraph, with who made each change. Names are whatever each person types — there is no sign-in — which is what a team that trusts each other needs, and it says so.
 
-AI REWRITES, WITH YOUR OWN KEY (OPTIONAL)
-
-Select some text and press the AI button: shorter, clearer, fix the grammar, more formal, or say what you want. You see the result word by word before anything changes, and one undo takes it back.
-
-The formatting survives. A paragraph with bold or a link in it is sent as its separate runs of text, never as HTML, and comes back the same way — so the bold is exactly where it was, and the "only the words change" promise holds with AI in the loop. The list of changes records which edits AI suggested and who accepted them.
-
-AI is off until you add your own Anthropic API key. Requests are billed to your Anthropic account. Only the text you select is sent, and only to Anthropic.
-
 WHAT IT DOES NOT DO
 
 You can change words, add another block like one that is already there, and attach comments. You cannot move, delete or resize elements, change CSS, classes, attributes or styles, or replace images. The restraint is the feature.
 
 PRIVACY
 
-Quick Edit sends your documents nowhere. It talks to the server your own document came from, to read it and, if you ask, save it back. If you add an Anthropic API key and ask for a rewrite, the text you selected is sent to Anthropic with your key. Nothing else ever leaves your browser: no analytics, no accounts, no servers of ours.
+Quick Edit sends your documents nowhere. It talks to the server your own document came from, to read it and, if you ask, save it back. Nothing else ever leaves your browser: no analytics, no accounts, no AI, no servers of ours.
 
 It stores two things, in your browser only: the name you typed, and — if you add one — your API key and chosen model. Your key is never visible to the pages you edit.
 ```
@@ -115,12 +107,7 @@ Chrome cannot write back to a file:// path, so saving an edited local file is pe
 
 **storage**
 ```
-Stores, in the user's own browser profile, the name they type to sign their comments and, only if they choose to add one, their own Anthropic API key and preferred model for the optional AI rewrite feature. Nothing about any document is stored.
-```
-
-**https://api.anthropic.com/\* (optional host permission)**
-```
-Requested only when the user saves their own Anthropic API key, to enable optional AI rewrites of text they select. The request to Anthropic is made from the extension's service worker, so the key is never exposed to the pages being edited. Without this permission every other feature works unchanged.
+Stores, in the user's own browser profile, the name they type to sign their comments and whether comments are rendered visibly in saved documents. Nothing about any document is stored.
 ```
 
 **file:///\* (optional host permission)**
@@ -135,19 +122,12 @@ Editing the visible text of an HTML document in the browser and saving it withou
 
 **Data usage**
 
-This changed with AI rewrites. Declare it accurately — an inaccurate data
+Declare it accurately — an inaccurate data
 disclosure is a common reason for rejection.
 
-Tick these categories:
-
-- **Website content** — the text the user selects, sent to Anthropic only when
-  they ask for an AI rewrite.
-- **Authentication information** — the user's own Anthropic API key, stored
-  locally and sent only to Anthropic to authenticate that user's own request.
-
-Do not tick anything else: there is no analytics, no tracking, no account, and
-the name the user types is stored locally and written only into documents they
-save themselves.
+Tick nothing. Quick Edit collects no user data: there is no analytics, no
+tracking, no account and no network request of its own. The name the user
+types is stored locally and written only into documents they save themselves.
 
 Certify all three: data is not sold to third parties; not used or transferred
 for purposes unrelated to the single purpose; not used to determine
@@ -183,10 +163,6 @@ similar, with plausible business content.
       product kept separate from your employer should not publish your
       employer's email.
 - [ ] Publish `store/PRIVACY.md` and paste its URL into the privacy field.
-- [ ] Test an AI rewrite with a real API key, once each on Claude Opus 5.5 and
-      Claude Haiku 4.5. The request shape is tested against the SDK but has not
-      been run against the live API from this machine.
-
 - [ ] Decide the npm name for the engine package — `html-text-splice` may be taken.
 - [ ] Read the IP assignment clause in the employment contract.
 - [ ] `./test/run.sh` passes.

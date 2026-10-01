@@ -60,7 +60,8 @@ another bullet after a bullet, another heading after a heading. Three ways, all
 equivalent:
 
 - **`Ctrl`/`Cmd` + `Enter`** from anywhere in the block
-- the small **`+`** that appears in the margin beside a block when you hover it
+- the **duplicate** button — two stacked sheets — in the margin beside a block
+  when you hover it
 - **Enter** at the very end of a **list item**, which starts the next one
 
 Enter elsewhere breaks the line rather than starting a new block, because inside
@@ -75,9 +76,14 @@ bar counts them so they do not disappear on you silently.
 
 ### Adding a table, a list, a heading
 
-**Insert** in the status bar offers a table, a bullet or numbered list, a
-heading, a paragraph or a quote. It goes in after whatever you were last typing
-in.
+The **`+`** in the margin beside a block opens a list: another one of the same
+thing, a table, a bullet or numbered list, a heading, a paragraph or a quote.
+Whatever you pick goes in directly after that block, which is the point of
+offering it from there — the controls are already beside the block, so there is
+no question of where the new thing goes.
+
+**Insert** in the status bar offers the same list, and puts it after whatever
+you were last typing in.
 
 Each one is **copied from the nearest one already in the document**. A table
 takes that table's `class` and its column count, and gets a header row only if
@@ -115,35 +121,10 @@ word-by-word view of it.
 Names are self-declared. There is no sign-in, so anyone can type any name; the
 list says so.
 
-### AI rewrites — optional, with your own key
-
-Select some text and press **✨ AI**: Shorter, Clearer, Fix spelling and
-grammar, More formal, Friendlier, or say what you want. The result is shown
-word by word before anything changes; Accept applies it as one undo step.
-
-**The formatting survives.** A paragraph with bold or a link in it is several
-runs of text to Quick Edit, and those runs are what is sent — never HTML. The
-same number come back, each into its own slot, so the bold is exactly where it
-was. A reply that changes the number of runs is refused rather than applied.
-Select words inside one run and only those words are rewritten.
-
-The list of changes records which edits AI suggested, who accepted them, and
-whether they were edited afterwards.
-
-AI is off until you add your own Anthropic API key — in the extension, from
-the toolbar popup under **Your name and AI**; in the web app, under
-**Settings**. Requests are billed to your Anthropic account. Only the selected
-text, plus a little context either side, is sent, and only to Anthropic.
-
-In the extension the key is typed into the extension's own popup and used only
-in its service worker. It never enters a page: an HTML file written by an AI
-can carry script, and anything typed into a page is visible to that page's
-scripts. The models offered are Claude Opus 5.5 (the default), Claude Sonnet
-5.5 and Claude Haiku 4.5; which one is the user's call and their bill.
-
 ### Comments
 
-Hover a section and click the **speech bubble** next to the `+`. A card opens in
+Hover a section and click the amber **speech bubble**, or open the same bubble
+in the status bar for **Comments & review**. A card opens in
 a margin down the right-hand side, the way a word processor does it: the section
 you commented on is shaded and barred so it is obvious which note belongs to
 what, and cards line up beside their section, sliding down when they would
@@ -199,8 +180,7 @@ would throw away every unsaved edit.
 | `scripting` | Inject the editor on demand instead of auto-running on every local file you open. |
 | `downloads` | Chrome cannot write back to a `file://` path, so saving is a download. Used with `saveAs: true` so the OS dialog always opens. |
 | — | **Nothing at all is requested for http or https.** A content script's `fetch` carries the page's origin, so re-reading the document it is running on, and `PUT`ting it back, are ordinary same-origin requests. `activeTab` covers the injection and that is the whole story. |
-| `storage` | The name you type and, only if you add them, your own Anthropic API key and model. In your browser profile. Nothing about any document. |
-| `https://api.anthropic.com/*` — **optional** | Asked for only when you save an API key, so the service worker can make AI rewrite requests. Everything else works without it. |
+| `storage` | The name you type, and whether comments are shown in the document. In your browser profile. Nothing about any document. |
 | `file:///*` — **optional** | Lets the service worker open the file itself. Not granted at install: the popup asks for it on a button press, Chrome shows its own consent prompt, and declining costs you one click per file instead. |
 
 There is no required `host_permissions`, no `storage`, and no network access of
@@ -355,8 +335,6 @@ src/content.js          reads the source, builds the map, routes messages
 src/editor.js           edit mode: constraints, history, status bar, saving
 src/lib/origins.js      which documents Quick Edit will touch, and why
 src/lib/structures.js   inserted tables and lists, cloned from the document
-src/lib/ai.js           AI rewrites: models, the request, checking the answer
-src/vendor/             the official Anthropic SDK, bundled (scripts/vendor-sdk.sh)
 src/lib/mapping.js      character ranges <-> DOM text nodes, verified
 src/lib/islands.js      the contenteditable wrappers and their values
 src/lib/blocks.js       where an added block goes, and what it looks like

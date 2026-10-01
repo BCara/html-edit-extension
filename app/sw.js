@@ -31,8 +31,6 @@ const SHELL = [
   '../src/lib/islands.js',
   '../src/lib/blocks.js',
   '../src/lib/structures.js',
-  '../src/vendor/anthropic-sdk.js',
-  '../src/lib/ai.js',
   '../src/lib/comments.js',
   '../src/lib/prompt.js',
   '../src/editor.js',

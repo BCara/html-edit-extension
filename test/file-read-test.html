@@ -28,7 +28,7 @@
 <script>
 'use strict';
 Report.mount('out', 'summary');
-const { ok, eq, heading, line } = Report;
+const { ok, eq, heading, line, fail } = Report;
 
 function attempt(fn) {
   return Promise.resolve().then(fn).then(
@@ -76,7 +76,7 @@ async function run() {
 }
 
 run().catch((err) => {
-  line('fail', '  FAIL  suite crashed — ' + (err && err.stack || err));
+  fail('  FAIL  suite crashed — ' + (err && err.stack || err));
   Report.finish();
 });
 </script>

@@ -25,42 +25,6 @@
 importScripts('/src/lib/origins.js');
 const Origins = self.QuickEditOrigins;
 
-// AI rewrites run here, not in the page. The user's API key is read from
-// extension storage and used only in this worker, so nothing in a document —
-// including script an AI-written HTML file might carry — can ever see it.
-importScripts('/src/vendor/anthropic-sdk.js', '/src/lib/ai.js');
-const Anthropic = self.QuickEditAnthropicSDK.Anthropic;
-const AI = self.QuickEditAI;
-const ANTHROPIC_ORIGIN = 'https://api.anthropic.com/*';
-
-async function aiSettings() {
-  const stored = await chrome.storage.local.get(['aiKey', 'aiModel']);
-  const granted = await chrome.permissions.contains({ origins: [ANTHROPIC_ORIGIN] });
-  return {
-    key: stored.aiKey || '',
-    model: AI.modelById(stored.aiModel || AI.DEFAULT_MODEL),
-    granted,
-  };
-}
-
-async function aiRewrite(request) {
-  const settings = await aiSettings();
-  if (!settings.key) {
-    return { ok: false, code: 'no-key', message: 'AI rewrites need your own Anthropic API key.' };
-  }
-  if (!settings.granted) {
-    return { ok: false, code: 'no-permission',
-             message: 'Quick Edit has not been allowed to contact Anthropic. Save your key again in its settings.' };
-  }
-  try {
-    const res = await AI.rewrite(Anthropic, settings.key,
-      Object.assign({}, request, { model: settings.model.id }));
-    return { ok: true, segments: res.segments, model: res.model || settings.model.id };
-  } catch (err) {
-    return { ok: false, code: err && err.code, message: AI.describeError(err, Anthropic) };
-  }
-}
-
 // Order matters: each library defines globals the next file uses.
 const INJECT_FILES = [
   'src/lib/origins.js',
@@ -70,7 +34,6 @@ const INJECT_FILES = [
   'src/lib/islands.js',
   'src/lib/blocks.js',
   'src/lib/structures.js',
-  'src/lib/ai.js',
   'src/lib/comments.js',
   'src/lib/prompt.js',
   'src/editor.js',
@@ -213,18 +176,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const verdict = classify(tab && tab.url);
       sendResponse({ ok: true, kind: verdict.kind, reason: verdict.reason });
     })();
-    return true;
-  }
-
-  if (msg.type === 'quickEdit:aiStatus') {
-    aiSettings().then((s) => sendResponse({
-      ok: true, configured: !!(s.key && s.granted), modelLabel: s.model.label,
-    }));
-    return true;
-  }
-
-  if (msg.type === 'quickEdit:ai') {
-    aiRewrite(msg.request || {}).then(sendResponse);
     return true;
   }
 

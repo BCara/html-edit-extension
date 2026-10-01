@@ -26,7 +26,7 @@
 <script>
 'use strict';
 Report.mount('out', 'summary');
-const { heading, ok, eq, line } = Report;
+const { heading, ok, eq, line, fail } = Report;
 
 const SAMPLE = [
   '<!doctype html>',
@@ -99,17 +99,18 @@ async function run() {
     ok(!out.includes('data-qe-island'), 'no editing wrapper reached the file');
   }
 
-  heading('your name and AI');
+  heading('settings kept in this browser');
   {
-    const status = await app.aiBridge.status();
-    eq(status.configured, false, 'with no key, AI reports itself as not set up');
-    let refused = null;
-    await app.aiBridge.rewrite({ segments: ['x'], instruction: 'y' }).catch((e) => { refused = e; });
-    ok(refused && /API key/.test(refused.message), 'and a rewrite says why, in words, without calling out');
     await app.settings.set('author', 'Tester');
     eq(await app.settings.get('author'), 'Tester', 'a name is remembered');
     await app.settings.set('author', '');
-    ok(!!W.QuickEditAnthropicSDK && !!W.QuickEditAI, 'the SDK and the AI module are both loaded');
+
+    // The editor stores a boolean; localStorage only holds strings, so the
+    // round trip has to put a real boolean back or the switch reads as on.
+    await app.settings.set('commentsVisible', true);
+    eq(await app.settings.get('commentsVisible'), true, 'the comments switch is remembered');
+    await app.settings.set('commentsVisible', false);
+    eq(await app.settings.get('commentsVisible'), false, 'and remembered when it is off');
   }
 
   heading('saving');
@@ -125,7 +126,7 @@ async function run() {
 }
 
 run().catch((err) => {
-  line('fail', '  FAIL  suite crashed — ' + (err && err.stack || err));
+  fail('  FAIL  suite crashed — ' + (err && err.stack || err));
   Report.finish();
 });
 </script>

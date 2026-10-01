@@ -33,7 +33,7 @@ const FIXTURES = [
 ];
 
 Report.mount('out', 'summary');
-const { line, heading, ok, eq, tally } = Report;
+const { line, heading, ok, eq, tally, fail } = Report;
 
 // --- helpers ---------------------------------------------------------------
 
@@ -641,7 +641,7 @@ async function run() {
       if (SPECIFIC[name]) SPECIFIC[name](fx);
     } catch (err) {
       tally.fail++;
-      line('fail', '  FAIL  could not run fixture — ' + (err && err.message || err));
+      fail('  FAIL  could not run fixture — ' + (err && err.message || err));
     }
   }
 
@@ -649,14 +649,14 @@ async function run() {
     elementChecks();
   } catch (err) {
     tally.fail++;
-    line('fail', '  FAIL  element checks — ' + (err && err.message || err));
+    fail('  FAIL  element checks — ' + (err && err.message || err));
   }
 
   try {
     await islandChecks();
   } catch (err) {
     tally.fail++;
-    line('fail', '  FAIL  island checks — ' + (err && err.message || err));
+    fail('  FAIL  island checks — ' + (err && err.message || err));
   }
 
   Report.finish();

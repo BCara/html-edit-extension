@@ -258,32 +258,16 @@ chrome.runtime.sendMessage({ type: 'quickEdit:classifyActive' }, (info) => {
 
 
 /*
- * Your name and AI.
+ * Your name.
  *
- * The API key is typed here, in the extension's own page, and nowhere else.
- * Typing a secret into a document would expose it to that document's scripts;
- * an extension page is out of their reach. The key is read back only by the
- * service worker, which is where the request to Anthropic is made.
+ * Typed here, in the extension's own page, and stored in extension storage so
+ * it is the same on every document. It signs comments and the list of changes;
+ * it is not a sign-in, and nothing verifies it.
  */
 (function settingsPanel() {
-  const AI = window.QuickEditAI;
-  const ANTHROPIC = 'https://api.anthropic.com/*';
   const $ = (id) => document.getElementById(id);
   const author = $('author');
-  const key = $('ai-key');
-  const model = $('ai-model');
-  const modelNote = $('ai-model-note');
   const status = $('ai-status');
-  const forget = $('ai-forget');
-
-  AI.MODELS.forEach((m) => {
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = m.label;
-    model.appendChild(opt);
-  });
-  const describeModel = () => { modelNote.textContent = AI.modelById(model.value).note; };
-  model.addEventListener('change', describeModel);
 
   function say(text, tone) {
     status.textContent = text;
@@ -291,56 +275,14 @@ chrome.runtime.sendMessage({ type: 'quickEdit:classifyActive' }, (info) => {
   }
 
   async function load() {
-    const s = await chrome.storage.local.get(['author', 'aiKey', 'aiModel']);
+    const s = await chrome.storage.local.get('author');
     author.value = s.author || '';
-    model.value = AI.modelById(s.aiModel || AI.DEFAULT_MODEL).id;
-    describeModel();
-    const granted = await chrome.permissions.contains({ origins: [ANTHROPIC] });
-    forget.hidden = !s.aiKey;
-    key.value = '';
-    if (s.aiKey) {
-      key.placeholder = 'Saved — ends …' + s.aiKey.slice(-4) + '. Type a new one to replace it.';
-      say(granted ? 'Ready: select text in a document, then press ✨ AI.'
-                  : 'Key saved, but Quick Edit is not yet allowed to contact Anthropic. Press Save AI settings.',
-          granted ? 'good' : 'bad');
-    } else {
-      key.placeholder = 'sk-ant-…';
-      say('No key yet. Everything else in Quick Edit works without one.');
-    }
+    say('');
   }
 
   $('author-save').addEventListener('click', async () => {
     await chrome.storage.local.set({ author: author.value.replace(/\s+/g, ' ').trim().slice(0, 60) });
     say('Name saved.', 'good');
-  });
-
-  // permissions.request must run straight from the click, so it comes first.
-  $('ai-save').addEventListener('click', () => {
-    const typed = key.value.trim();
-    chrome.permissions.request({ origins: [ANTHROPIC] }, async (granted) => {
-      if (!granted) {
-        say('Without permission to contact Anthropic, AI rewrites cannot work. Nothing was saved.', 'bad');
-        return;
-      }
-      const next = { aiModel: model.value };
-      if (typed) {
-        if (!/^sk-ant-/.test(typed)) {
-          say('That does not look like an Anthropic API key — they start with sk-ant-.', 'bad');
-          return;
-        }
-        next.aiKey = typed;
-      }
-      await chrome.storage.local.set(next);
-      const s = await chrome.storage.local.get('aiKey');
-      if (!s.aiKey) { say('Model saved. Add a key to use AI rewrites.'); return; }
-      await load();
-    });
-  });
-
-  forget.addEventListener('click', async () => {
-    await chrome.storage.local.remove('aiKey');
-    await load();
-    say('Key removed from this browser.');
   });
 
   load();

@@ -15,7 +15,7 @@
 'use strict';
 
 Report.mount('out', 'summary');
-const { line, heading, ok, eq } = Report;
+const { line, heading, ok, eq, fail } = Report;
 
 const BR = QuickEditIslands.BR;
 let SOURCE = '';
@@ -899,98 +899,6 @@ async function run() {
     QuickEditEditor.undo();       // the insertion
   }
 
-  // --- AI rewrites, driven without a network --------------------------------
-
-  function selectAcross(startNode, startOffset, endNode, endOffset) {
-    const range = document.createRange();
-    range.setStart(startNode, startOffset);
-    range.setEnd(endNode, endOffset);
-    const sel = document.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-
-  heading('AI rewrite — the formatting stays exactly where it was');
-  {
-    // #p4 is "Another <span class="x">paragraph</span> with an inline span." —
-    // three runs of text with an element between them.
-    const islands = [...document.querySelectorAll('#p4 [data-qe-island]')];
-    const first = islands[0].firstChild, second = islands[1].firstChild;
-    selectAcross(first, 0, second, 1);        // crosses into the span: whole block
-
-    const scope = QuickEditEditor.selectionScope();
-    ok(!!scope, 'a selection across formatting has something to rewrite');
-    eq(scope.mode, 'block', 'and it is the whole block, not just the selected characters');
-    eq(scope.segments.length, islands.length, 'sent as one segment per run of text');
-
-    const before = QuickEditEditor.preview();
-    const rewritten = scope.segments.map((_, i) => 'R' + i + ' ');
-    const res = QuickEditEditor.applyRewrite(scope, rewritten, { label: 'Test', model: 'test-model' });
-    ok(res.ok, 'the rewrite is applied');
-
-    const after = QuickEditEditor.preview();
-    ok(after.indexOf('<span class="x">R1 </span>') !== -1,
-       'the inline span is exactly where it was, around its own rewritten words');
-    ok(after.indexOf('data-qe-island') === -1, 'no editing wrapper reached the file');
-    // Several runs changed, so there is no single diff to inspect. The
-    // invariant is simpler anyway: with the text between tags taken out, the
-    // two files are the same markup, character for character.
-    //
-    // Except <br>, and deliberately. A <br> in the FILE sits between runs, so
-    // the model never sees it and it cannot move. A <br> INSIDE a run is a line
-    // break someone typed this session — earlier tests typed two into #p4 —
-    // and that is part of the text being rewritten, shown as a return arrow in
-    // the preview. This fake answer contains none, so those two go, correctly.
-    const tagsOnly = (html) => html.replace(/>[^<]*</g, '><').replace(/<br>/g, '');
-    eq(tagsOnly(after), tagsOnly(before), 'every tag in the file is exactly as it was — only words changed');
-
-    const ai = QuickEditEditor.changes().filter((c) => c.ai);
-    ok(ai.length > 0 && ai[0].ai.label === 'Test', 'the list of changes says AI did it, and which rewrite');
-
-    QuickEditEditor.undo();
-    eq(QuickEditEditor.preview(), before, 'one undo takes the whole rewrite back, every run at once');
-    QuickEditEditor.redo();
-    eq(QuickEditEditor.preview(), after, 'and one redo puts it back');
-    QuickEditEditor.undo();
-  }
-
-  heading('AI rewrite — what it refuses');
-  {
-    const islands = [...document.querySelectorAll('#p4 [data-qe-island]')];
-    selectAcross(islands[0].firstChild, 0, islands[1].firstChild, 1);
-    const scope = QuickEditEditor.selectionScope();
-    const before = QuickEditEditor.preview();
-
-    const short = QuickEditEditor.applyRewrite(scope, ['only one'], { label: 'Test' });
-    ok(!short.ok, 'a rewrite with the wrong number of segments is refused');
-    eq(QuickEditEditor.preview(), before, 'and nothing was changed');
-
-    typeInto(islands[0], 'typed meanwhile ', 0);
-    const stale = QuickEditEditor.applyRewrite(scope, scope.segments.map(() => 'X'), { label: 'Test' });
-    ok(!stale.ok, 'a rewrite of text the user has since changed is refused, not applied over their typing');
-    QuickEditEditor.undo();
-  }
-
-  heading('AI rewrite — just the words selected');
-  {
-    const island = islandFor('#p5');
-    const value = valueOf(island);
-    const at = value.indexOf('carrying');
-    ok(at !== -1, 'the paragraph has the word to select');
-    selectAcross(island.firstChild, at, island.firstChild, at + 'carrying'.length);
-
-    const scope = QuickEditEditor.selectionScope();
-    eq(scope.mode, 'part', 'a selection inside one run rewrites only the selected words');
-    eq(scope.segments[0], 'carrying', 'and sends exactly those');
-
-    const res = QuickEditEditor.applyRewrite(scope, ['holding'], { label: 'Test' });
-    ok(res.ok, 'the rewrite is applied');
-    eq(valueOf(island), value.replace('carrying', 'holding'), 'and the rest of the run is untouched');
-    QuickEditEditor.undo();
-    eq(valueOf(island), value, 'undo restores it');
-    document.getSelection().removeAllRanges();
-  }
-
   heading('adding — the file still parses to what is on screen');
   {
     const edited = QuickEditEditor.preview();
@@ -1127,6 +1035,6 @@ async function run() {
 }
 
 run().catch((err) => {
-  line('fail', '  FAIL  suite crashed — ' + (err && err.stack || err));
+  fail('  FAIL  suite crashed — ' + (err && err.stack || err));
   Report.finish();
 });

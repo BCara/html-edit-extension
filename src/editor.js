@@ -109,10 +109,8 @@
     doc: null,            // the document being edited; null means this one
     win: null,
     settings: null,       // host storage: { get(key), set(key, value) }
-    ai: null,             // host AI: { status(), rewrite(req), settingsHint }
     author: '',           // the name the user typed, self-declared
     assist: null,         // the layer holding the AI chip, AI card, changes list
-    aiJob: null,          // the rewrite in progress, if any
     nudgedName: false,    // suggested adding a name once already
     source: '',
     map: null,
@@ -235,6 +233,17 @@
     '  box-shadow: 0 4px 22px rgba(0, 0, 0, .42);',
     '}',
     '.p-label { font-weight: 600; }',
+    '.p-head { display: flex; align-items: center; gap: 8px; }',
+    '.p-title { font-weight: 600; flex: 1; }',
+    // Detail is one press away rather than always on screen: the panel is for
+    // doing something, and four lines of explanation above the controls makes
+    // it something to read instead.
+    '.p-info {',
+    '  flex: none; width: 19px; height: 19px; padding: 0; border-radius: 50%;',
+    '  font: 600 11px/1 ui-serif, Georgia, serif; font-style: italic;',
+    '  background: rgba(255, 255, 255, .13); color: #c6cbd6;',
+    '}',
+    '.p-info:hover, .p-info[aria-expanded="true"] { background: #d9a01e; color: #231d10; }',
     '.p-row { display: flex; gap: 6px; }',
     '.p-input {',
     '  font: inherit; flex: 1 1 auto; min-width: 0; box-sizing: border-box;',
@@ -250,8 +259,9 @@
     '}',
     '.p-check input { flex: none; margin: 0; accent-color: #d9a01e; cursor: pointer; }',
     '.p-changes { text-align: left; border-radius: 7px; }',
-    '.p-ai { display: flex; flex-direction: column; gap: 5px; }',
-    '.p-ai .ok { color: #9fe0b5; }',
+    // The bar's comment button wears the same bubble as the one beside a
+    // paragraph, so the two are recognisably the same thing in two places.
+    'button.icon svg { width: 14px; height: 14px; fill: currentColor; display: block; }',
     // The insert menu opens upward: the bar is pinned to the bottom right, so
     // there is never room below it and always room above.
     '.menu[hidden] { display: none; }',
@@ -653,7 +663,6 @@
     state.lastTouch = now;
     region.current = after;
     region.by = authorName();
-    if (region.ai) region.ai.edited = true;
     markChanged(region);
     refresh();
   }
@@ -873,14 +882,12 @@
     // Esc closes the insert menu, and is checked before the modifier gate
     // below because it carries no modifier.
     if (e.key === 'Escape' &&
-        (isMenuOpen() || isAddMenuOpen() || isMoreOpen() || isAIOpen() || isChangesOpen())) {
+        (isMenuOpen() || isAddMenuOpen() || isMoreOpen() || isChangesOpen())) {
       e.preventDefault();
       setMenuOpen(false);
       setMoreOpen(false);
       if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
-      // Innermost first: the AI card is the thing being worked in.
-      if (isAIOpen()) closeAI();
-      else closeChanges();
+      closeChanges();
       return;
     }
 
@@ -938,7 +945,7 @@
 
   // --- the "+" that appears on hover -----------------------------------------
 
-  var ADD_BTN = 22;   // button diameter
+  var ADD_BTN = 24;   // button size
   var ADD_GAP = 8;    // breathing room between the buttons and the text
 
   var ADD_CSS = [
@@ -948,28 +955,33 @@
     '.row.stack { flex-direction: column; }',
     // Sitting over the text is the fallback, so there it carries its own backing.
     '.row.over {',
-    '  background: #fff; border-radius: 999px; padding: 3px;',
-    '  box-shadow: 0 1px 6px rgba(0, 0, 0, .35);',
+    '  background: #fff; border-radius: 11px; padding: 3px;',
+    '  box-shadow: 0 1px 6px rgba(0, 0, 0, .3);',
     '}',
     'button {',
     '  font: 600 15px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;',
-    '  width: 22px; height: 22px; padding: 0;',
+    '  width: 24px; height: 24px; padding: 0;',
     '  display: flex; align-items: center; justify-content: center;',
-    '  border: 0; border-radius: 50%; cursor: pointer;',
+    '  border: 0; border-radius: 8px; cursor: pointer;',
     '  color: #fff;',
     // A white ring, so they read against a dark page as well as a light one.
-    '  box-shadow: 0 0 0 2px #fff, 0 1px 4px rgba(0, 0, 0, .35);',
+    '  box-shadow: 0 0 0 2px #fff, 0 1px 3px rgba(0, 0, 0, .28);',
+    '  transition: transform .09s ease, filter .09s ease;',
     '}',
     '.row.over button { box-shadow: none; }',
-    'button:hover { filter: brightness(1.15); }',
-    'button.block { background: #5b52f0; }',
+    'button:hover { filter: brightness(1.12); transform: translateY(-1px); }',
+    'button:active { transform: none; }',
+    'button:focus-visible { outline: 2px solid #5b52f0; outline-offset: 2px; }',
+    // The + opens the list of everything that can go here, because "what do I
+    // want" is the question someone actually has when they reach for it. The
+    // one-click repeat of what is already there is still worth its own button,
+    // but it is a specific answer, so it gets a specific icon rather than the
+    // most general symbol on the row.
+    'button.more { background: #5b52f0; }',
+    'button.block { background: #6b7280; }',
     'button.note { background: #d9a01e; }',
-    // Subordinate on purpose: adding another of what is already there is the
-    // common case and stays one click on the + . This is the way to the rest.
-    // It says that in grey rather than by being smaller: an odd-sized circle
-    // sat off the row's centre line and left the amber note button bulging
-    // out beside it, which read as a stray yellow smudge rather than a button.
-    'button.more { background: #6b7280; }',
+    // Pressed, the + holds the menu open and should look it.
+    'button.more[aria-expanded="true"] { background: #4038d6; transform: none; }',
     '.menu[hidden] { display: none; }',
     '.menu {',
     '  position: absolute; left: 100%; top: 0; margin-left: 7px;',
@@ -989,7 +1001,8 @@
     '.menu button:hover { background: rgba(255, 255, 255, .16); filter: none; }',
     '.menu .sep { height: 1px; margin: 3px 4px; background: rgba(255,255,255,.14); }',
     '.menu .same { font-weight: 600; }',
-    'svg { width: 12px; height: 12px; fill: currentColor; display: block; }',
+    'svg { width: 13px; height: 13px; fill: currentColor; display: block; }',
+    '.menu button svg { display: none; }',
   ].join('\n');
 
   function ensureAddButton() {
@@ -1005,10 +1018,20 @@
     var shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = '<style>' + ADD_CSS + '</style>' +
       '<div class="row">' +
-        '<button class="block" title="Add another one of these">+</button>' +
-        '<button class="more" title="Insert something else here">' +
+        // The + now means "put something here", which is the question people
+        // actually arrive with, and it opens the whole list.
+        '<button class="more" title="Insert something here" aria-expanded="false">' +
           '<svg viewBox="0 0 16 16" aria-hidden="true">' +
-          '<path d="M3 5.5h10L8 11z"/>' +
+          '<path d="M7 2h2v5h5v2H9v5H7V9H2V7h5z"/>' +
+          '</svg>' +
+        '</button>' +
+        // Two stacked sheets: one more of the thing already there. A specific
+        // action deserves a specific picture, not the most general symbol on
+        // the row.
+        '<button class="block" title="Add another one of these">' +
+          '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+          '<path d="M5 2h8a1 1 0 0 1 1 1v8h-2V4H5z"/>' +
+          '<path d="M3 5h6a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/>' +
           '</svg>' +
         '</button>' +
         '<button class="note" title="Comment on this section">' +
@@ -1032,11 +1055,14 @@
     });
 
     /*
-     * The + adds another of whatever is already there, in one click, because
-     * that is nearly always what is wanted and it is the reason the button
-     * exists. This opens the rest — a table, a list, a heading — inserted in
-     * the same place, which is the point: the controls are already beside the
-     * block, so there is no question of where the new thing goes.
+     * The + opens the list — a paragraph, a table, a heading — all inserted in
+     * the same place, which is the point of offering it from here rather than
+     * only from the toolbar: the controls are already beside the block, so
+     * there is no question of where the new thing goes.
+     *
+     * The first item in that list is still "another one of these", so the
+     * common case is two clicks from here and one click from the button
+     * beside it.
      */
     var menu = shadow.querySelector('.menu');
     shadow.querySelector('.more').addEventListener('mousedown', function (e) {
@@ -1073,6 +1099,7 @@
       host: host,
       row: shadow.querySelector('.row'),
       menu: menu,
+      plus: shadow.querySelector('.more'),
       same: shadow.querySelector('.same'),
     };
     return state.add;
@@ -1087,9 +1114,10 @@
   function setAddMenuOpen(open) {
     if (!state.add) return;
     state.add.menu.hidden = !open;
+    state.add.plus.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
       clearAddHide();
-      // Name the thing the default would add, so the menu says what the + does.
+      // Name the block being hovered, so the first item says what it will add.
       var tag = state.hoverBlock ? state.hoverBlock.localName : 'block';
       state.add.same.textContent = 'Another ' + tag;
     }
@@ -1199,9 +1227,6 @@
     if (isMenuOpen()) setMenuOpen(false);
     if (isMoreOpen()) setMoreOpen(false);
     if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
-    // A card still waiting for a choice goes; one with a result or a request
-    // in flight stays, because losing either to a stray click is worse.
-    if (state.aiJob && (state.aiJob.status === 'choose' || state.aiJob.status === 'error')) closeAI();
   }
 
   function onMouseOver(e) {
@@ -1238,8 +1263,6 @@
     ['focusin', onFocusIn, true],
     ['mouseover', onMouseOver, true],
     ['mousedown', onMouseDownAnywhere, false],
-    ['selectionchange', onSelectionChange, false],
-    ['scroll', onScrollAssist, true],
     ['click', onClick, true],
     ['submit', onSubmit, true],
   ];
@@ -1787,6 +1810,13 @@
    * positioning is set inline with !important, since that is the one part a
    * page rule could still fight over.
    */
+  // The same speech bubble the hover controls use, so the button in the bar
+  // reads as "comments" rather than as "a menu of other things".
+  var BUBBLE =
+    '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+    '<path d="M3 2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7l-3.6 2.8V12H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>' +
+    '</svg>';
+
   function ensureStatusBar() {
     if (state.ui && state.ui.host.isConnected) return;
 
@@ -1820,30 +1850,31 @@
         '<button class="undo icon" title="Undo (Ctrl/Cmd+Z)" aria-label="Undo" disabled>\u21b6</button>' +
         '<button class="redo icon" title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo" disabled>\u21b7</button>' +
         '<span class="sep"></span>' +
-        '<button class="more-btn icon" title="Your name, changes and AI" aria-label="More">⋯</button>' +
+        '<button class="more-btn icon" title="Comments and review" ' +
+                'aria-label="Comments and review">' + BUBBLE + '</button>' +
         '<div class="panel" hidden>' +
-          '<label class="p-label" for="qe-author">Your name</label>' +
+          '<div class="p-head">' +
+            '<span class="p-title">Comments &amp; review</span>' +
+            '<button class="p-info" aria-expanded="false" ' +
+                    'title="What these do" aria-label="What these do">i</button>' +
+          '</div>' +
           '<div class="p-row">' +
             '<input id="qe-author" class="p-input" maxlength="60" autocomplete="name" ' +
-                   'placeholder="So people can see who wrote what">' +
+                   'aria-label="Your name" placeholder="Your name">' +
             '<button class="p-save">Save</button>' +
           '</div>' +
-          '<div class="p-hint">Shown on your comments and in the list of changes. ' +
-            'It is whatever you type here, not a sign-in, so anyone can use any name.</div>' +
-          '<div class="p-sep"></div>' +
+          '<div class="p-hint" data-info hidden>Signs your comments and the list of ' +
+            'changes. Not a sign-in — anyone can type any name.</div>' +
           '<label class="p-check">' +
             '<input type="checkbox" class="p-show-comments">' +
             'Show comments in the document' +
           '</label>' +
-          '<div class="p-hint">Off, a comment is an HTML comment: it travels inside ' +
-            'the file, but no browser displays it. On, it is saved as a visible note ' +
-            'anyone can read without Quick Edit. Either way the words, the name and ' +
-            'the date are the same, so the switch can be moved back and forth. It ' +
-            'rewrites every comment in the file the next time you save.</div>' +
+          '<div class="p-hint" data-info hidden>Off, a comment is hidden in the file: ' +
+            'it travels with the document but no browser shows it. On, it is saved as ' +
+            'a visible note anyone can read without Quick Edit. The switch goes both ' +
+            'ways, and rewrites every comment next time you save.</div>' +
           '<div class="p-sep"></div>' +
           '<button class="p-changes">Show changes</button>' +
-          '<div class="p-sep"></div>' +
-          '<div class="p-ai"></div>' +
         '</div>' +
         '<button class="save primary" disabled>Save</button>' +
         '<button class="done">Done</button>' +
@@ -1866,9 +1897,15 @@
       authorInput: shadow.querySelector('.p-input'),
       authorSave: shadow.querySelector('.p-save'),
       changesBtn: shadow.querySelector('.p-changes'),
-      moreAI: shadow.querySelector('.p-ai'),
+      info: shadow.querySelector('.p-info'),
+      infoRows: shadow.querySelectorAll('[data-info]'),
       showComments: shadow.querySelector('.p-show-comments'),
     };
+    ui.info.addEventListener('click', function () {
+      var open = ui.info.getAttribute('aria-expanded') !== 'true';
+      ui.info.setAttribute('aria-expanded', open ? 'true' : 'false');
+      for (var i = 0; i < ui.infoRows.length; i++) ui.infoRows[i].hidden = !open;
+    });
     ui.showComments.checked = !!state.commentsVisible;
     ui.showComments.addEventListener('change', function () {
       setCommentsVisible(ui.showComments.checked);
@@ -2032,35 +2069,6 @@
     var n = collectChanges().length;
     state.ui.changesBtn.textContent = n
       ? 'Show changes (' + n + ')' : 'Show changes (none yet)';
-
-    var box = state.ui.moreAI;
-    box.textContent = '';
-    var title = doc().createElement('div');
-    title.className = 'p-label';
-    title.textContent = 'AI rewrites';
-    box.appendChild(title);
-    var line = doc().createElement('div');
-    line.className = 'p-hint';
-    box.appendChild(line);
-
-    if (!state.ai) {
-      line.textContent = 'Not available here.';
-      return;
-    }
-    line.textContent = 'Checking…';
-    Promise.resolve(state.ai.status()).then(function (st) {
-      if (st && st.configured) {
-        line.innerHTML = '';
-        var ok = doc().createElement('span');
-        ok.className = 'ok';
-        ok.textContent = 'Ready, using ' + (st.modelLabel || 'Claude') + '. ';
-        line.appendChild(ok);
-        line.appendChild(doc().createTextNode(
-          'Select some text, then press ✨ AI. Only that text is sent, to Anthropic, with your key.'));
-      } else {
-        line.textContent = 'Needs your own Anthropic API key. ' + (state.ai.settingsHint || '');
-      }
-    }).catch(function () { line.textContent = 'Could not check the AI settings.'; });
   }
 
   // --- the list of changes ----------------------------------------------------
@@ -2091,17 +2099,14 @@
         var block = Blocks.blockFor(r.island) || r.island;
         var group = byBlock.get(block);
         if (!group) {
-          group = { kind: 'edit', block: block, by: r.by, ai: r.ai, target: block };
+          group = { kind: 'edit', block: block, by: r.by, target: block };
           byBlock.set(block, group);
           list.push(group);
         }
         if (r.by) group.by = r.by;
-        if (r.ai && !group.ai) group.ai = r.ai;
-        if (r.ai && r.ai.edited) group.ai = r.ai;
-        if (!r.ai && group.ai) group.mixed = true;      // some of it typed by hand
       } else if (r.kind === 'insert' && !r.removed && r.current) {
         list.push({ kind: 'added', what: describeTag(r.template.tag), after: r.current,
-                    by: r.by, ai: r.ai, target: r.element });
+                    by: r.by, target: r.element });
       }
     }
     // Each group's before and after is the whole block's text, unchanged runs
@@ -2124,7 +2129,7 @@
       var typed = t.cells.filter(function (c) { return c.current; });
       list.push({ kind: 'added', what: Structures.kindById(t.id).label.toLowerCase(),
                   after: typed.map(function (c) { return c.current; }).join(' · '),
-                  by: typed[0] && typed[0].by, ai: typed.some(function (c) { return c.ai; }) && typed[0].ai,
+                  by: typed[0] && typed[0].by,
                   target: t.element });
     }
     for (i = 0; i < state.comments.length; i++) {
@@ -2150,11 +2155,9 @@
   function changeHeading(ch) {
     var who = displayName(ch.by);
     if (ch.kind === 'edit') {
-      if (!ch.ai) return who + ' · edited';
-      return who + ' · accepted an AI rewrite (' + ch.ai.label + ')' +
-             (ch.ai.edited || ch.mixed ? ', then edited it' : '');
+      return who + ' · edited';
     }
-    if (ch.kind === 'added') return who + ' · added a ' + ch.what + (ch.ai ? ', with AI' : '');
+    if (ch.kind === 'added') return who + ' · added a ' + ch.what;
     if (ch.kind === 'comment-add') return who + ' · added a comment';
     if (ch.kind === 'comment-edit') return 'Comment edited' + (ch.by ? ' (' + ch.by + '’s)' : '');
     return 'Comment deleted' + (ch.by ? ' (' + ch.by + '’s)' : '');
@@ -2216,7 +2219,7 @@
     list.forEach(function (ch) {
       var li = doc().createElement('li');
       var btn = doc().createElement('button');
-      btn.className = 'c-row' + (ch.ai ? ' is-ai' : '');
+      btn.className = 'c-row';
       var who = doc().createElement('span');
       who.className = 'c-who';
       who.textContent = changeHeading(ch);
@@ -2239,148 +2242,7 @@
     box.appendChild(ol);
   }
 
-  // --- AI rewrites ----------------------------------------------------------------
-
-  /*
-   * What a selection would rewrite, or null.
-   *
-   * Two shapes. Words inside one run of text are rewritten on their own, with
-   * the rest of the run sent as context. Anything else — a selection crossing
-   * into bold, or a whole paragraph — becomes the whole block, sent as its runs
-   * so the formatting between them survives: see QuickEditAI.
-   */
-  function selectionScope() {
-    var sel = doc().getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
-    var range = sel.getRangeAt(0);
-    var startIsland = islandOf(range.startContainer);
-    var endIsland = islandOf(range.endContainer);
-    if (!startIsland) return null;
-    var startRegion = regionOf(startIsland);
-    if (!startRegion || startRegion.removed) return null;
-    var rect = range.getBoundingClientRect();
-
-    if (startIsland === endIsland) {
-      var value = startRegion.current;
-      var a = Islands.indexAt(startIsland, range.startContainer, range.startOffset);
-      var b = Islands.indexAt(startIsland, range.endContainer, range.endOffset);
-      if (a !== null && b !== null && b > a && (b - a) < value.length && value.slice(a, b).trim()) {
-        return {
-          mode: 'part', regions: [startRegion], snapshot: [value], start: a, end: b,
-          segments: [value.slice(a, b)], before: value.slice(0, a), after: value.slice(b),
-          rect: rect,
-        };
-      }
-    }
-
-    var block = Blocks.blockFor(startIsland);
-    if (!block) return null;
-    var regions = [];
-    var islands = block.querySelectorAll('[' + Islands.ATTR + ']');
-    for (var i = 0; i < islands.length; i++) {
-      var r = regionOf(islands[i]);
-      if (r && !r.removed) regions.push(r);
-    }
-    var segments = regions.map(function (r2) { return r2.current; });
-    if (!segments.join('').trim()) return null;
-    return {
-      mode: 'block', regions: regions, snapshot: segments.slice(), segments: segments,
-      before: neighbourText(block, 'previousElementSibling'),
-      after: neighbourText(block, 'nextElementSibling'),
-      rect: rect, block: block,
-    };
-  }
-
-  function neighbourText(block, direction) {
-    var n = block[direction];
-    while (n && n.hasAttribute && n.hasAttribute(UI_ATTR)) n = n[direction];
-    return n ? (n.textContent || '').replace(/\s+/g, ' ').trim() : '';
-  }
-
-  // Island values carry U+0001 for a <br>; the model sees an ordinary newline.
-  function toModelText(value) { return value.split(Islands.BR).join('\n'); }
-
-  /*
-   * And back. A newline becomes a <br> only where the original run already had
-   * one — otherwise a rewrite could introduce line breaks, which is markup the
-   * user did not ask for. Control characters, U+0001 included, never survive.
-   */
-  function fromModelText(text, original) {
-    var clean = sanitiseText(text);
-    if (original.indexOf(Islands.BR) !== -1) return clean.split('\n').join(Islands.BR);
-    return clean.replace(/\s*\n\s*/g, ' ');
-  }
-
-  function applyValue(region, value) {
-    Islands.writeValue(region.island, value);
-    region.current = value;
-    markChanged(region);
-  }
-
-  /*
-   * Put a rewrite into the document as one undoable step.
-   *
-   * Refuses if the text moved underneath: a rewrite of words the user has since
-   * changed would quietly throw their typing away.
-   */
-  function applyRewrite(scope, segments, meta) {
-    for (var i = 0; i < scope.regions.length; i++) {
-      if (scope.regions[i].current !== scope.snapshot[i] || scope.regions[i].removed) {
-        return { ok: false, message: 'The text changed after the rewrite was asked for. Nothing was changed; try again.' };
-      }
-    }
-    if (segments.length !== scope.segments.length) {
-      return { ok: false, message: 'The rewrite did not line up with the text. Nothing was changed.' };
-    }
-
-    var entries = [];
-    if (scope.mode === 'part') {
-      var r = scope.regions[0];
-      var next = r.current.slice(0, scope.start) + fromModelText(segments[0], scope.segments[0]) +
-                 r.current.slice(scope.end);
-      if (next !== r.current) entries.push({ region: r, before: r.current, after: next });
-    } else {
-      for (var j = 0; j < scope.regions.length; j++) {
-        var value = fromModelText(segments[j], scope.segments[j]);
-        if (value !== scope.regions[j].current) {
-          entries.push({ region: scope.regions[j], before: scope.regions[j].current, after: value });
-        }
-      }
-    }
-    if (!entries.length) return { ok: false, message: 'The rewrite came back unchanged.' };
-
-    entries.forEach(function (e) {
-      var ai = { label: meta.label, model: meta.model || '', edited: false };
-      e.prevAI = e.region.ai;
-      e.prevBy = e.region.by;
-      e.nextAI = ai;
-      e.nextBy = authorName();
-      applyValue(e.region, e.after);
-      e.region.ai = ai;
-      e.region.by = e.nextBy;
-    });
-    pushHistory({ kind: 'multi', entries: entries });
-    refresh();
-    positionCards();
-    renderChanges();
-    return { ok: true, changed: entries.length };
-  }
-
-  function applyMulti(entry, forward) {
-    entry.entries.forEach(function (e) {
-      applyValue(e.region, forward ? e.after : e.before);
-      // A redo puts back the rewrite as it was accepted, not as later typing
-      // left it — that typing was undone to get here.
-      e.region.ai = forward
-        ? (e.nextAI && { label: e.nextAI.label, model: e.nextAI.model, edited: false })
-        : e.prevAI;
-      e.region.by = forward ? e.nextBy : e.prevBy;
-    });
-    state.lastTouch = 0;
-    refresh();
-    positionCards();
-    renderChanges();
-  }
+  // --- the layer the changes list floats in ----------------------------------
 
   var ASSIST_CSS = [
     ':host { all: initial; }',
@@ -2388,54 +2250,30 @@
     '  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f1f2f5; }',
     '[hidden] { display: none !important; }',
     'button { font: inherit; color: inherit; cursor: pointer; border: 0; }',
-    '.chip {',
-    '  position: absolute; pointer-events: auto; padding: 5px 11px; border-radius: 999px;',
-    '  background: #5b52f0; color: #fff; font-weight: 600; font-size: 12px;',
-    '  box-shadow: 0 0 0 2px #fff, 0 2px 10px rgba(0, 0, 0, .3);',
-    '}',
-    '.chip:hover { background: #6d64ff; }',
-    '.card, .changes {',
+    '.changes {',
     '  position: absolute; pointer-events: auto; box-sizing: border-box;',
     '  border-radius: 12px; background: rgba(22, 22, 27, .97);',
     '  box-shadow: 0 6px 28px rgba(0, 0, 0, .45);',
+    '  right: 16px; bottom: 70px; width: 380px; max-width: calc(100vw - 32px);',
+    '  max-height: 62vh; overflow: auto; padding: 12px;',
+    '  display: flex; flex-direction: column; gap: 8px;',
     '}',
-    '.card { width: 360px; max-width: calc(100vw - 24px); padding: 12px 13px;',
-    '  display: flex; flex-direction: column; gap: 9px; }',
-    '.a-head, .c-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }',
+    '.c-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }',
     '.a-title { font-weight: 600; }',
     '.x { background: transparent; font-size: 17px; line-height: 1; padding: 2px 6px;',
     '  border-radius: 6px; color: #9aa0ad; }',
     '.x:hover { background: rgba(255, 255, 255, .12); color: #fff; }',
-    '.a-scope, .a-meta, .c-note { color: #9aa0ad; font-size: 11.5px; }',
-    '.a-presets { display: flex; flex-wrap: wrap; gap: 6px; }',
-    '.a-preset, .a-btn { padding: 6px 11px; border-radius: 8px;',
-    '  background: rgba(255, 255, 255, .12); }',
-    '.a-preset:hover, .a-btn:hover { background: rgba(255, 255, 255, .22); }',
-    '.a-btn.primary { background: #5b52f0; }',
-    '.a-btn.primary:hover { background: #6d64ff; }',
-    '.a-custom { display: flex; gap: 6px; }',
-    '.a-input { font: inherit; flex: 1 1 auto; min-width: 0; box-sizing: border-box;',
-    '  padding: 7px 9px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .2);',
-    '  background: rgba(255, 255, 255, .07); color: inherit; }',
-    '.a-input:focus { outline: 2px solid #7c74ff; outline-offset: 0; }',
-    '.a-diff { background: rgba(255, 255, 255, .06); border-radius: 8px; padding: 9px 10px;',
-    '  max-height: 40vh; overflow: auto; line-height: 1.55; white-space: pre-wrap; }',
-    'del { color: #ff9f9f; text-decoration: line-through; text-decoration-color: rgba(255,159,159,.7); }',
-    // A removed word running straight into its replacement reads as one word.
-    'del + ins, ins + del { margin-left: .3em; }',
-    'ins { color: #9fe0b5; text-decoration: none; background: rgba(159, 224, 181, .12); border-radius: 3px; }',
-    '.a-row { display: flex; gap: 6px; flex-wrap: wrap; }',
-    '.a-error { color: #ffc4a8; }',
-    '.changes { right: 16px; bottom: 70px; width: 380px; max-width: calc(100vw - 32px);',
-    '  max-height: 62vh; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }',
+    '.c-note { color: #9aa0ad; font-size: 11.5px; }',
     '.c-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }',
     '.c-row { width: 100%; text-align: left; display: flex; flex-direction: column; gap: 3px;',
     '  padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, .06);',
     '  border-left: 3px solid rgba(255, 255, 255, .25); }',
-    '.c-row.is-ai { border-left-color: #8f88ff; }',
     '.c-row:hover { background: rgba(255, 255, 255, .12); }',
     '.c-who { font-weight: 600; font-size: 12px; }',
     '.c-diff { color: #d6d9e0; font-size: 12px; overflow-wrap: anywhere; }',
+    'del { color: #ff9f9f; text-decoration: line-through; text-decoration-color: rgba(255,159,159,.7); }',
+    'del + ins, ins + del { margin-left: .3em; }',
+    'ins { color: #9fe0b5; text-decoration: none; background: rgba(159, 224, 181, .12); border-radius: 3px; }',
   ].join('\n');
 
   function ensureAssist() {
@@ -2452,29 +2290,14 @@
     var shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = '<style>' + ASSIST_CSS + '</style>' +
       '<div class="layer">' +
-        '<button class="chip" hidden title="Rewrite the selected text with AI">✨ AI</button>' +
-        '<div class="card" hidden role="dialog" aria-label="Rewrite with AI"></div>' +
         '<div class="changes" hidden role="dialog" aria-label="Changes"></div>' +
       '</div>';
     doc().documentElement.appendChild(host);
 
-    var chip = shadow.querySelector('.chip');
-    // mousedown with the default prevented: the selection is what is being
-    // rewritten, and a normal click would clear it before the scope is read.
-    chip.addEventListener('mousedown', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      openAI();
-    });
-    // Clicks inside the card or the list are not clicks "away" from them.
-    shadow.querySelector('.card').addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    // A click inside the list is not a click "away" from it.
     shadow.querySelector('.changes').addEventListener('mousedown', function (e) { e.stopPropagation(); });
 
-    state.assist = {
-      host: host, chip: chip,
-      card: shadow.querySelector('.card'),
-      changes: shadow.querySelector('.changes'),
-    };
+    state.assist = { host: host, changes: shadow.querySelector('.changes') };
     return state.assist;
   }
 
@@ -2483,251 +2306,8 @@
       state.assist.host.parentNode.removeChild(state.assist.host);
     }
     state.assist = null;
-    state.aiJob = null;
   }
 
-  function hideChip() { if (state.assist) state.assist.chip.hidden = true; }
-
-  /*
-   * Where the chip goes. With a pointer, at the end of the selection, sitting
-   * on its last line rather than over the line below. On touch, below it: the
-   * system's own selection toolbar sits above, and the chip should not fight
-   * it for the space.
-   */
-  function placeChip(rect) {
-    var a = ensureAssist();
-    var w = win();
-    a.chip.hidden = false;
-    var cw = a.chip.offsetWidth || 60;
-    var chh = a.chip.offsetHeight || 26;
-    var coarse = w.matchMedia && w.matchMedia('(pointer: coarse)').matches;
-    var end = endRect() || rect;
-    var left, top;
-    if (coarse) {
-      left = Math.min(Math.max(8, end.right - cw), w.innerWidth - cw - 8);
-      top = rect.bottom + 10;
-    } else {
-      // Above where the selection ends, clear of the text on either side.
-      left = Math.min(Math.max(8, end.right - cw / 2), w.innerWidth - cw - 8);
-      top = end.top - chh - 6;
-      if (top < 8) top = rect.bottom + 8;
-    }
-    if (top + chh > w.innerHeight - 8) top = Math.max(8, rect.top - chh - 8);
-    a.chip.style.left = left + 'px';
-    a.chip.style.top = top + 'px';
-  }
-
-  // The last line box of the selection — where the user stopped dragging.
-  function endRect() {
-    var sel = doc().getSelection();
-    if (!sel || !sel.rangeCount) return null;
-    var rects = sel.getRangeAt(0).getClientRects();
-    for (var i = rects.length - 1; i >= 0; i--) {
-      if (rects[i].width > 0 || rects[i].height > 0) return rects[i];
-    }
-    return null;
-  }
-
-  function onSelectionChange() {
-    if (!state.active) return;
-    if (state.aiJob) return;             // the card is open; leave it be
-    var scope = selectionScope();
-    if (!scope || !scope.rect || (!scope.rect.width && !scope.rect.height)) { hideChip(); return; }
-    placeChip(scope.rect);
-  }
-
-  function onScrollAssist() {
-    if (!state.assist) return;
-    if (state.aiJob) { placeCard(); return; }
-    if (!state.assist.chip.hidden) onSelectionChange();
-  }
-
-  function openAI() {
-    var scope = selectionScope();
-    if (!scope) { hideChip(); return; }
-    hideChip();
-    state.aiJob = { scope: scope, status: 'choose', token: 0 };
-    renderAI();
-    if (state.ai) {
-      Promise.resolve(state.ai.status()).then(function (st) {
-        if (state.aiJob && state.aiJob.scope === scope && !(st && st.configured)) {
-          state.aiJob.status = 'error';
-          state.aiJob.error = 'AI rewrites need your own Anthropic API key. ' + (state.ai.settingsHint || '');
-          renderAI();
-        }
-      }).catch(function () {});
-    }
-  }
-
-  function closeAI() {
-    state.aiJob = null;
-    if (state.assist) state.assist.card.hidden = true;
-  }
-
-  function isAIOpen() { return !!state.aiJob; }
-
-  function runAI(instruction, label) {
-    var job = state.aiJob;
-    if (!job) return;
-    if (!state.ai) {
-      job.status = 'error';
-      job.error = 'AI rewrites are not available here.';
-      renderAI();
-      return;
-    }
-    job.status = 'running';
-    job.instruction = instruction;
-    job.label = label;
-    var token = ++job.token;
-    renderAI();
-
-    state.ai.rewrite({
-      segments: job.scope.segments.map(toModelText),
-      instruction: instruction,
-      before: toModelText(job.scope.before || ''),
-      after: toModelText(job.scope.after || ''),
-    }).then(function (res) {
-      if (state.aiJob !== job || job.token !== token) return;     // superseded
-      job.status = 'preview';
-      job.result = res.segments;
-      job.model = res.model || '';
-      renderAI();
-    }).catch(function (err) {
-      if (state.aiJob !== job || job.token !== token) return;
-      job.status = 'error';
-      job.error = String((err && err.message) || err);
-      renderAI();
-    });
-  }
-
-  function acceptAI() {
-    var job = state.aiJob;
-    if (!job || job.status !== 'preview') return;
-    var res = applyRewrite(job.scope, job.result, { label: job.label, model: job.model });
-    if (!res.ok) {
-      job.status = 'error';
-      job.error = res.message;
-      renderAI();
-      return;
-    }
-    closeAI();
-    flash('Rewrite applied — Ctrl/Cmd+Z undoes it');
-  }
-
-  function el(tag, cls, text) {
-    var n = doc().createElement(tag);
-    if (cls) n.className = cls;
-    if (text !== undefined) n.textContent = text;
-    return n;
-  }
-
-  function button(cls, text, onClick) {
-    var b = el('button', cls, text);
-    b.type = 'button';
-    b.addEventListener('click', onClick);
-    return b;
-  }
-
-  function renderAI() {
-    var a = ensureAssist();
-    var job = state.aiJob;
-    var card = a.card;
-    if (!job) { card.hidden = true; return; }
-    card.hidden = false;
-    card.textContent = '';
-
-    var head = el('div', 'a-head');
-    head.appendChild(el('span', 'a-title', '✨ Rewrite with AI'));
-    var x = button('x', '×', closeAI);
-    x.title = 'Close';
-    head.appendChild(x);
-    card.appendChild(head);
-    card.appendChild(el('div', 'a-scope', job.scope.mode === 'part'
-      ? 'The words you selected.'
-      : 'This whole ' + describeTag(job.scope.block ? job.scope.block.localName : 'paragraph') +
-        ', with its formatting kept where it is.'));
-
-    if (job.status === 'choose') {
-      var presets = el('div', 'a-presets');
-      var list = AI() ? AI().PRESETS : [];
-      list.forEach(function (pr) {
-        presets.appendChild(button('a-preset', pr.label, function () { runAI(pr.instruction, pr.label); }));
-      });
-      card.appendChild(presets);
-
-      var form = el('form', 'a-custom');
-      var input = el('input', 'a-input');
-      input.id = 'qe-ai-instruction';
-      input.placeholder = 'Or say what you want…';
-      input.setAttribute('aria-label', 'What should the rewrite do?');
-      input.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { e.preventDefault(); closeAI(); }
-        e.stopPropagation();
-      });
-      form.appendChild(input);
-      var go = el('button', 'a-btn primary', 'Rewrite');
-      go.type = 'submit';
-      form.appendChild(go);
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var what = input.value.trim();
-        if (what) runAI(what, what.length > 40 ? what.slice(0, 40) + '…' : what);
-      });
-      card.appendChild(form);
-      card.appendChild(el('div', 'a-meta',
-        'Only this text is sent, to Anthropic, using your own API key. You see the result before anything changes.'));
-    } else if (job.status === 'running') {
-      card.appendChild(el('div', '', 'Rewriting — ' + job.label + '…'));
-      var row = el('div', 'a-row');
-      row.appendChild(button('a-btn', 'Cancel', closeAI));
-      card.appendChild(row);
-    } else if (job.status === 'preview') {
-      var box = el('div', 'a-diff');
-      if (job.scope.mode === 'part') {
-        diffInto(box, job.scope.segments[0], fromModelText(job.result[0], job.scope.segments[0]));
-      } else {
-        diffInto(box, job.scope.segments.join(''),
-          job.result.map(function (seg, i) { return fromModelText(seg, job.scope.segments[i]); }).join(''));
-      }
-      card.appendChild(box);
-      var rowP = el('div', 'a-row');
-      rowP.appendChild(button('a-btn primary', 'Accept', acceptAI));
-      rowP.appendChild(button('a-btn', 'Try again', function () { runAI(job.instruction, job.label); }));
-      rowP.appendChild(button('a-btn', 'Back', function () { job.status = 'choose'; renderAI(); }));
-      card.appendChild(rowP);
-      card.appendChild(el('div', 'a-meta', job.label + (job.model ? ' · ' + job.model : '') +
-        ' · nothing changes until you accept'));
-    } else {
-      card.appendChild(el('div', 'a-error', job.error || 'Something went wrong.'));
-      var rowE = el('div', 'a-row');
-      rowE.appendChild(button('a-btn', 'Back', function () { job.status = 'choose'; renderAI(); }));
-      if (state.ai && state.ai.openSettings) {
-        rowE.appendChild(button('a-btn primary', 'AI settings', function () { state.ai.openSettings(); }));
-      }
-      card.appendChild(rowE);
-    }
-
-    placeCard();
-    var first = card.querySelector('.a-input');
-    if (first && job.status === 'choose') first.focus({ preventScroll: true });
-  }
-
-  function placeCard() {
-    var a = state.assist;
-    var job = state.aiJob;
-    if (!a || !job) return;
-    var w = win();
-    var rect = job.scope.rect;
-    var cw = a.card.offsetWidth || 360;
-    var ch = a.card.offsetHeight || 220;
-    var left = Math.min(Math.max(12, rect.left), w.innerWidth - cw - 12);
-    var top = rect.bottom + 10;
-    if (top + ch > w.innerHeight - 12) top = rect.top - ch - 10;
-    if (top < 12) top = Math.max(12, w.innerHeight - ch - 80);
-    a.card.style.left = Math.max(12, left) + 'px';
-    a.card.style.top = top + 'px';
-  }
 
   // --- saving ----------------------------------------------------------------
 
@@ -3150,7 +2730,6 @@
   function init(options) {
     state.doc = options.doc || null;
     state.settings = options.settings || null;
-    state.ai = options.ai || null;
     state.author = options.author || '';
     if (state.settings) {
       Promise.resolve(state.settings.get('author')).then(function (name) {
@@ -3213,13 +2792,9 @@
     serialise: serialise,
     addAfterIsland: addAfterIsland,
     insertStructure: insertStructure,
-    // Authorship, the list of changes and AI rewrites. applyRewrite and
-    // selectionScope are exposed so the suite can drive a rewrite without a
-    // network or a real selection gesture.
+    // Authorship and the list of changes.
     setAuthor: setAuthor,
     changes: collectChanges,
-    selectionScope: selectionScope,
-    applyRewrite: applyRewrite,
     openChanges: openChanges,
     atEndOfBlock: atEndOfBlock,
     addCommentTo: addCommentTo,

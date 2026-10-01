@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.8.1';
+  var VERSION = '0.9.0';
   var REQUIRED = [
     'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
     'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
@@ -88,11 +88,8 @@
     });
   }
 
-  /*
-   * The name the user types lives in extension storage, so it is the same on
-   * every document. The API key never passes through here at all: rewrites
-   * are requested from the service worker, which is where the key is read.
-   */
+  // The name the user types, and whether comments are shown in the document,
+  // live in extension storage, so they are the same on every document.
   var SETTINGS = {
     get: function (key) {
       return chrome.storage.local.get(key).then(function (o) { return o[key]; });
@@ -101,23 +98,6 @@
       var o = {};
       o[key] = value;
       return chrome.storage.local.set(o);
-    },
-  };
-
-  var AI_BRIDGE = {
-    settingsHint: 'Click the Quick Edit icon in Chrome’s toolbar and open “Your name and AI”.',
-    status: function () {
-      return send({ type: 'quickEdit:aiStatus' }).then(function (res) {
-        return res && res.ok ? res : { configured: false };
-      });
-    },
-    rewrite: function (request) {
-      return send({ type: 'quickEdit:ai', request: request }).then(function (res) {
-        if (res && res.ok) return { segments: res.segments, model: res.model };
-        var err = new Error((res && res.message) || 'The rewrite failed.');
-        err.code = res && res.code;
-        throw err;
-      });
     },
   };
 
@@ -402,7 +382,6 @@
         Editor.init({
           source: source, map: map, filename: filename(), served: state.served,
           settings: SETTINGS,
-          ai: AI_BRIDGE,
           // null unless the user chose the file through the picker, in which
           // case Save writes over the top of it instead of downloading a copy.
           saveFile: saveFile,

@@ -28,6 +28,17 @@
 
   function heading(text) { line('head', text); }
 
+  /*
+   * A failure that is not an assertion — a crash, a fixture that would not
+   * load. It has to go through the tally, not just onto the page: writing the
+   * word FAIL into the output while leaving tally.fail at zero is how a suite
+   * that died halfway through once reported ALL PASS and exited 0.
+   */
+  function fail(text) {
+    tally.fail++;
+    line('fail', text);
+  }
+
   function ok(cond, name, detail) {
     if (cond) {
       tally.pass++;
@@ -53,7 +64,7 @@
   }
 
   root.Report = {
-    mount: mount, line: line, heading: heading,
+    mount: mount, line: line, heading: heading, fail: fail,
     ok: ok, eq: eq, finish: finish, tally: tally,
   };
 })(typeof self !== 'undefined' ? self : globalThis);

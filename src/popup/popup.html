@@ -44,26 +44,9 @@
     <p class="note">Shown on your comments and in the list of changes. It is whatever
        you type, not a sign-in, so anyone can use any name.</p>
 
-    <label for="ai-key">Anthropic API key <span class="opt">optional</span></label>
-    <div class="row">
-      <input id="ai-key" type="password" autocomplete="off" spellcheck="false"
-             placeholder="sk-ant-…">
-    </div>
-    <label for="ai-model">Model</label>
-    <select id="ai-model"></select>
-    <p class="note" id="ai-model-note"></p>
-    <div class="actions">
-      <button id="ai-save" class="primary">Save AI settings</button>
-      <button id="ai-forget" hidden>Forget key</button>
-    </div>
     <p class="note" id="ai-status"></p>
-    <p class="note">With a key, you can select text and ask for a rewrite. Only the
-       text you select is sent, to Anthropic, using your key and billed to your
-       Anthropic account. Your key is kept in this browser on this device and is
-       never shown to the pages you edit. Get one at console.anthropic.com.</p>
   </details>
 
   <p class="foot" id="foot"></p>
 </div>
-<script src="../lib/ai.js"></script>
 <script src="popup.js"></script>
