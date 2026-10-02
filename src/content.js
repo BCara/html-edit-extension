@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.12.2';
+  var VERSION = '0.12.3';
   var REQUIRED = [
     'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
     'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',
@@ -74,7 +74,6 @@
     // is the one route that can also write to it. See saveThroughHandle().
     handle: null,
     kind: null,             // 'file' | 'lan' | 'copy', from origins.js
-    writesInPlace: false,   // a handle is in hand: Save overwrites silently
     canWriteFile: false,    // Save can write, once it has asked where
   };
 
@@ -369,7 +368,6 @@
   function askForHandle() {
     return Prompt.saveAs(filename()).then(function (handle) {
       state.handle = handle;
-      state.writesInPlace = !!handle;
       return handle;
     });
   }
@@ -487,11 +485,10 @@
         // Whether Save CAN write the file. Whether it already knows which file
         // is state.handle, and that may only be answered at the first save.
         state.canWriteFile = !!saveFile;
-        state.writesInPlace = !!state.handle;
         state.ready = true;
         console.log('[VibeRevise] read via ' + state.readVia + ' —',
                     map.stats.editable, 'editable regions', map.stats,
-                    state.writesInPlace ? '— Save writes over the file'
+                    state.handle ? '— Save writes over the file'
                       : state.canWriteFile ? '— Save will ask once where to write'
                       : '');
         return state;
@@ -512,7 +509,12 @@
       stats: state.map.stats,
       reasons: reasons,
       readVia: state.readVia,
-      writeBack: state.writesInPlace ? 'file'
+      // Derived, never stored. It used to be a flag set when a handle was
+      // acquired and never cleared when one was lost, so after a failed write
+      // the popup went on claiming the file was being saved in place while
+      // every save was quietly going to the Downloads folder instead. A status
+      // panel that lies is worse than no status panel.
+      writeBack: state.handle ? 'file'
         : state.canWriteFile ? 'file-ask'
         : state.served ? (state.served.canPut ? 'server' : 'download') : 'download',
       editor: Editor.status(),
