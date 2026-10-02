@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.11.0';
+  var VERSION = '0.11.1';
   var REQUIRED = [
     'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
     'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
@@ -180,7 +180,24 @@
    * editor.js. Without them a save could silently clobber someone else's edit.
    */
   function readServed(url) {
-    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+    /*
+     * The second request for a page the browser has already fetched.
+     *
+     * On your own server that is nothing: ask again, get the same bytes. On
+     * somebody else's it can matter, because some URLs are not idempotent —
+     * a sign-in link, a confirm or unsubscribe link, a one-time download. A
+     * second credentialed GET can consume or trigger one of those.
+     *
+     * force-cache asks the browser for the copy it already has, which is both
+     * the right bytes (the ones it parsed into this page) and no request at
+     * all when it has them. It is not a guarantee — a no-store response still
+     * goes to the network — so this narrows the window rather than closing it,
+     * and the limitation is written down in the README rather than implied
+     * away here.
+     */
+    var opts = { credentials: 'same-origin' };
+    if (isCopy()) opts.cache = 'force-cache';
+    return fetch(url, opts).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       // state.served is the write-back route, so a public page does not get
       // one. Reading is identical; it is only saving that differs.

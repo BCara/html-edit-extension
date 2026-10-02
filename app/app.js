@@ -224,6 +224,15 @@ async function load(source, name, handle) {
   }
 
   window.QuickEditEditor.init({
+    /*
+     * The editor ignores synthetic events in the extension, because a page it
+     * did not write could forge them. Here it may trust them, and not as a
+     * concession: the document is in a frame sandboxed WITHOUT allow-scripts,
+     * so nothing in it runs at all. The only code that can dispatch an event
+     * into that document is this app. See the sandbox note at the top of this
+     * file, and fromUser() in editor.js.
+     */
+    trustSynthetic: true,
     doc: d,
     source: source,
     map: map,

@@ -173,7 +173,7 @@ async function run() {
     (r) => r.editable && r.node.data.indexOf('Running') !== -1);
   eq(harnessText.length, 0, 'the harness UI is excluded from the map');
 
-  QuickEditEditor.init({ source: SOURCE, map, filename: 'editor-test.html' });
+  QuickEditEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
   QuickEditEditor.setActive(true);
   ok(QuickEditEditor.isActive(), 'edit mode turns on');
 
@@ -830,10 +830,9 @@ async function run() {
 
   // Pressing a key on whatever has focus: the editor listens on the document,
   // so this reaches it the same way a real key press would.
-  function press(key) {
-    return document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {
-      key: key, bubbles: true, cancelable: true,
-    }));
+  function press(key, opts) {
+    return document.activeElement.dispatchEvent(new KeyboardEvent('keydown',
+      Object.assign({ key: key, bubbles: true, cancelable: true }, opts || {})));
   }
 
   heading('a freshly inserted thing goes away again on Esc or Delete');
@@ -976,7 +975,7 @@ async function run() {
    */
   function withSaveFile(fn) {
     const calls = [];
-    QuickEditEditor.init({
+    QuickEditEditor.init({ trustSynthetic: true,
       source: SOURCE, map, filename: 'editor-test.html',
       saveFile: (text) => { calls.push(text); return fn(text); },
     });
@@ -1081,8 +1080,70 @@ async function run() {
        'and moving it back means nothing is pending after all');
   }
 
+  heading('a page cannot drive the editor by forging events');
+  {
+    /*
+     * The whole suite runs with trustSynthetic on, because a test can only
+     * produce synthetic events. That makes the guard the one thing the suite
+     * would otherwise never exercise, so this turns it off and pushes from the
+     * side a hostile page would be on.
+     *
+     * The threat is specific to editing a page the user did not write: forged
+     * Ctrl+S raises a Save dialog nobody asked for, forged Ctrl+Z throws away
+     * their work, and forged input puts the page's words into the document to
+     * be saved as if the user had typed them.
+     *
+     * Everything is measured against preview() — the bytes Save would write —
+     * because that is the guarantee. What a page can scribble into its own DOM
+     * is its business; what matters is that none of it reaches the file.
+     */
+    const island = islandFor('#p3');
+    const fileBefore = QuickEditEditor.preview();
+    const unsavedBefore = QuickEditEditor.status().unsaved;
+    const calls = withSaveFile(() => ({ ok: true, where: 'saved' }));
+
+    // Hostile from here: no trustSynthetic, as in the extension.
+    QuickEditEditor.init({ source: SOURCE, map, filename: 'editor-test.html' });
+
+    /*
+     * Events only, with no DOM write — which is exactly what a page can do.
+     * Forging beforeinput does not make a contenteditable mutate; only the
+     * browser does that. What the page is trying for here is to have the
+     * editor record a change it never made.
+     */
+    caretTo(island, 0);
+    for (const type of ['beforeinput', 'input']) {
+      island.dispatchEvent(new InputEvent(type, {
+        inputType: 'insertText', data: 'INJECTED ', bubbles: true, cancelable: true,
+      }));
+    }
+    eq(QuickEditEditor.preview(), fileBefore,
+       'forged input is not recorded as something the user typed');
+    eq(QuickEditEditor.status().unsaved, unsavedBefore,
+       'and is not counted as something the user typed');
+
+    await QuickEditEditor.save();
+    eq(calls.length, 0, 'a forged Ctrl/Cmd+S cannot make the editor save');
+
+    press('z', { ctrlKey: true });
+    press('y', { ctrlKey: true });
+    eq(QuickEditEditor.preview(), fileBefore,
+       'and forged undo and redo cannot throw work away or bring it back');
+
+    press('Delete');
+    press('Backspace');
+    press('Escape');
+    press('Enter', { ctrlKey: true });
+    eq(QuickEditEditor.preview(), fileBefore,
+       'nor can Delete, Backspace, Esc or Ctrl+Enter change the file');
+
+    // Back to a suite that can drive itself.
+    QuickEditEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
+    eq(QuickEditEditor.preview(), fileBefore, 'and the file is exactly as it was');
+  }
+
   // Put the editor back the way the rest of the page expects it.
-  QuickEditEditor.init({ source: SOURCE, map, filename: 'editor-test.html' });
+  QuickEditEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
 
   Report.finish();
 }

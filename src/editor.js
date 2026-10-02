@@ -731,6 +731,9 @@
   // --- input handling --------------------------------------------------------
 
   function onBeforeInput(e) {
+    // Forged input is the serious one: it would put the page's words into the
+    // document and record them as something the user typed.
+    if (!fromUser(e)) return;
     var island = islandOf(e.target);
     if (!island || !state.active) return;
     var type = e.inputType || '';
@@ -780,6 +783,7 @@
   }
 
   function onInput(e) {
+    if (!fromUser(e)) return;
     var island = islandOf(e.target);
     if (!island || !state.active) return;
     if (!Islands.isClean(island)) flatten(island);
@@ -825,7 +829,7 @@
   }
 
   function onPaste(e) {
-    if (!state.active) return;
+    if (!state.active || !fromUser(e)) return;
     var island = islandOf(e.target);
     if (!island) return;
     // Always intercept: the clipboard usually carries text/html as well, and
@@ -836,7 +840,7 @@
   }
 
   function onDrop(e) {
-    if (!state.active) return;
+    if (!state.active || !fromUser(e)) return;
     e.preventDefault();
     flash('Drag and drop is not supported — copy and paste instead');
   }
@@ -941,8 +945,31 @@
     return what ? what.label.toLowerCase() : 'new block';
   }
 
+  /*
+   * Did a person do this, or did the page?
+   *
+   * Every listener below is on the document, which page script can reach and
+   * dispatch to whatever world the editor itself runs in. isTrusted is false
+   * for anything dispatchEvent produced, and that is the only thing telling
+   * the two apart.
+   *
+   * It did not matter while Quick Edit only opened documents the user wrote.
+   * It matters now that it opens pages they did not: without this, a page can
+   * forge Ctrl+S and raise a Save dialog nobody asked for, forge Ctrl+Z to
+   * undo work, or forge beforeinput to put its own words into the document and
+   * have them recorded as the user's edit — which the user would then save.
+   *
+   * state.trustSynthetic exists because the test suite can only produce
+   * synthetic events. It is never set by the extension or the web app, and the
+   * suite tests the guard itself with it off, so the hatch does not quietly
+   * become the only path anyone exercises.
+   */
+  function fromUser(e) {
+    return !!(e && (e.isTrusted || state.trustSynthetic));
+  }
+
   function onKeyDown(e) {
-    if (!state.active) return;
+    if (!state.active || !fromUser(e)) return;
 
     // Esc closes the insert menu, and is checked before the modifier gate
     // below because it carries no modifier.
@@ -2824,6 +2851,8 @@
     // which of those it did; the extension supplies nothing and keeps the
     // server/download path below.
     state.saveFile = options.saveFile || null;
+    // Only the test suite passes this. See fromUser().
+    state.trustSynthetic = options.trustSynthetic === true;
     state.win = state.doc ? state.doc.defaultView : null;
     state.source = options.source;
     state.map = options.map;

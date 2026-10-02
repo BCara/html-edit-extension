@@ -181,6 +181,23 @@ Write-back stays private-only. A server on your own network may accept a save;
 somebody else's website never does, and `mayWriteBack()` in
 [`src/lib/origins.js`](src/lib/origins.js) is the single place that decides it.
 
+**Two things to know before you use it on a page you do not control.**
+
+The page's own scripts keep running while you edit. They cannot drive Quick
+Edit — every document-level handler ignores events that did not come from you,
+which is what `fromUser()` in [`src/editor.js`](src/editor.js) is for, and
+nothing a page writes into its own DOM is recorded as your edit or reaches the
+saved file. But they can still see what you type into the page, because it is
+their page. If that matters for a particular document, open it in the web app
+instead: there the document is rendered in a frame with scripts disabled, so
+nothing in it runs at all.
+
+Reading the page asks the browser for the bytes it already has
+(`cache: 'force-cache'`), but a response marked no-store will still be fetched
+again. A second request is harmless on an ordinary page and is not harmless on
+a single-use URL — a sign-in link, a confirmation link, a one-time download —
+so do not point Quick Edit at one of those.
+
 ### Saving
 
 For a **served** document whose server accepts a write-back, Save writes the
