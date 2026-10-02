@@ -127,6 +127,26 @@
   }];
 
   /*
+   * Both pickers are given the same id, which is what makes them open where
+   * the last one did.
+   *
+   * The browser remembers a directory per id, across sessions, and without one
+   * every picker opens in Downloads — which is almost never where the document
+   * is. Sharing the id between opening and saving is deliberate: they are two
+   * halves of working on one file, and a save that starts somewhere other than
+   * where the file was opened is the thing that makes people save a second
+   * copy of their document by accident.
+   */
+  var PICKER_ID = 'viberevise-doc';
+
+  // Start the picker beside a file we already have a handle for, when there is
+  // one. A file handle names its own directory, so this is "open where that
+  // file lives" without ever having to know a path.
+  function startingPoint(near) {
+    return near || undefined;
+  }
+
+  /*
    * Ask the user to choose a file, and keep asking until they pick one that
    * `validate` accepts or they cancel.
    *
@@ -166,7 +186,12 @@
         errorEl.textContent = '';
         if (!CAN_HANDLE) { viaInput(); return; }
 
-        window.showOpenFilePicker({ types: PICKER_TYPES, multiple: false })
+        window.showOpenFilePicker({
+          types: PICKER_TYPES,
+          multiple: false,
+          id: PICKER_ID,
+          startIn: startingPoint(options.near),
+        })
           .then(function (handles) {
             var handle = handles[0];
             return handle.getFile().then(function (file) { return offer(file, handle); });
@@ -218,14 +243,19 @@
    * Ask for somewhere to write, defaulting to the file being edited.
    *
    * Picking the same file is the point — that is what "save over the top"
-   * means — so the name is pre-filled and the user only has to confirm.
+   * means — so the name is pre-filled, the picker opens where the last one
+   * did, and `near` starts it in that file's own directory when we have a
+   * handle for it. The user should only have to confirm.
+   *
    * Resolves with null if they cancel, which is an answer, not a failure.
    */
-  function saveAs(suggestedName) {
+  function saveAs(suggestedName, near) {
     if (typeof window.showSaveFilePicker !== 'function') return Promise.resolve(null);
     return window.showSaveFilePicker({
       suggestedName: suggestedName,
       types: PICKER_TYPES,
+      id: PICKER_ID,
+      startIn: startingPoint(near),
     }).catch(function (err) {
       if (err && err.name === 'AbortError') return null;
       console.log('[VibeRevise] the save picker would not give a handle:', err);

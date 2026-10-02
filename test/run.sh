@@ -14,6 +14,7 @@ echo "== node: AI rewrites (no network) =="
 echo
 echo "== node: origins and the write-back probe =="
 node "$DIR/src/lib/origins.test.js" || NODE_FAIL=1
+node "$DIR/src/lib/prompt.test.js" || NODE_FAIL=1
 
 echo
 echo "== node: tokenizer + splice =="

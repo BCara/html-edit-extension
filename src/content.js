@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.12.3';
+  var VERSION = '0.13.0';
   var REQUIRED = [
     'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
     'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',
@@ -73,6 +73,10 @@
     // Set only when the user chose the file through showOpenFilePicker, which
     // is the one route that can also write to it. See saveThroughHandle().
     handle: null,
+    // The last handle we held, kept after the live one is dropped. Only ever
+    // used to tell a picker where to open, so losing write access to a file
+    // does not also lose the knowledge of which folder it was in.
+    near: null,
     kind: null,             // 'file' | 'lan' | 'copy', from origins.js
     canWriteFile: false,    // Save can write, once it has asked where
   };
@@ -283,6 +287,7 @@
       // Held for saving. A file chosen this way can be written back to, so the
       // click the user has just spent is worth more than one read.
       state.handle = chosen.handle;
+      state.near = chosen.handle || state.near;
       return chosen.file.text();
     }).then(function (text) {
       state.readVia = 'file picker';
@@ -346,6 +351,7 @@
         // lapsed — must not lose the edits with it. fallback:true tells the
         // editor to download instead of reporting a dead end.
         console.warn('[VibeRevise] writing through the handle failed:', err);
+        state.near = state.handle || state.near;   // where to reopen, at least
         state.handle = null;
         return { ok: false, fallback: true, message: err && err.message || String(err) };
       });
@@ -358,6 +364,7 @@
     if (state.handle) {
       return Prompt.canWrite(state.handle).then(function (allowed) {
         if (allowed) return state.handle;
+        state.near = state.handle;      // still useful as a starting point
         state.handle = null;
         return askForHandle();
       });
@@ -366,8 +373,9 @@
   }
 
   function askForHandle() {
-    return Prompt.saveAs(filename()).then(function (handle) {
+    return Prompt.saveAs(filename(), state.near).then(function (handle) {
       state.handle = handle;
+      state.near = handle || state.near;
       return handle;
     });
   }
