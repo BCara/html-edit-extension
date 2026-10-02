@@ -100,20 +100,18 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
   font-size: 11px;
 }
 
-/* ---- your name and AI ------------------------------------------------ */
+/* ---- your name -------------------------------------------------------- */
 .settings { margin: 4px 0 10px; border-top: 1px solid var(--line); padding-top: 9px; }
 .settings summary { cursor: pointer; font-weight: 600; }
-.settings label { display: block; margin: 10px 0 4px; font-weight: 600; }
-.settings .opt { font-weight: 400; color: var(--muted); }
-.settings .row { display: flex; gap: 6px; }
-.settings input, .settings select {
+.settings .row { display: flex; gap: 6px; margin-top: 9px; }
+.settings input {
   font: inherit; flex: 1 1 auto; min-width: 0; width: 100%;
   padding: 6px 8px; border-radius: 6px;
   border: 1px solid var(--line); background: transparent; color: var(--fg);
 }
-.settings input:focus, .settings select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.settings input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 .settings .note { color: var(--muted); font-size: 12px; margin: 5px 0 0; }
-.settings .actions { margin: 10px 0 0; }
-.settings #ai-status.good { color: #15803d; }
-.settings #ai-status.bad { color: var(--warn); }
-@media (prefers-color-scheme: dark) { .settings #ai-status.good { color: #86efac; } }
+.settings .note:empty { display: none; }
+.settings #author-status.good { color: #15803d; }
+.settings #author-status.bad { color: var(--warn); }
+@media (prefers-color-scheme: dark) { .settings #author-status.good { color: #86efac; } }

@@ -34,17 +34,15 @@
   </details>
 
   <details id="settings" class="settings">
-    <summary>Your name and AI</summary>
+    <summary>Your name</summary>
 
-    <label for="author">Your name</label>
     <div class="row">
-      <input id="author" maxlength="60" autocomplete="name" placeholder="So people can see who wrote what">
+      <input id="author" maxlength="60" autocomplete="name"
+             aria-label="Your name" placeholder="Your name">
       <button id="author-save">Save</button>
     </div>
-    <p class="note">Shown on your comments and in the list of changes. It is whatever
-       you type, not a sign-in, so anyone can use any name.</p>
-
-    <p class="note" id="ai-status"></p>
+    <p class="note">Signs your comments. Not a sign-in.</p>
+    <p class="note" id="author-status"></p>
   </details>
 
   <p class="foot" id="foot"></p>

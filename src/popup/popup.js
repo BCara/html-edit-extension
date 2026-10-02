@@ -270,7 +270,7 @@ chrome.runtime.sendMessage({ type: 'vibeRevise:classifyActive' }, (info) => {
 (function settingsPanel() {
   const $ = (id) => document.getElementById(id);
   const author = $('author');
-  const status = $('ai-status');
+  const status = $('author-status');
 
   function say(text, tone) {
     status.textContent = text;
