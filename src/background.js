@@ -20,9 +20,16 @@
  * the user asked for — it is never stored, and never sent anywhere else.
  */
 
-// The classifier decides which documents VibeRevise will touch; the popup gets
-// its verdict relayed rather than re-deriving it.
-importScripts('/src/lib/origins.js');
+/*
+ * The classifier decides which documents VibeRevise will touch; the popup gets
+ * its verdict relayed rather than re-deriving it.
+ *
+ * Chrome runs this file as a service worker, where importScripts() is how a
+ * dependency is pulled in. Firefox runs it as an event page, where that
+ * function does not exist and the manifest lists origins.js ahead of this file
+ * instead. Both end up with the same global, so everything below is identical.
+ */
+if (typeof importScripts === 'function') importScripts('/src/lib/origins.js');
 const Origins = self.VibeReviseOrigins;
 
 // Order matters: each library defines globals the next file uses.
@@ -72,7 +79,15 @@ async function activeLocalTab() {
   const verdict = classify(tab.url);
   if (!verdict.kind) return { tab, code: 'not-editable', reason: verdict.reason };
 
-  if (verdict.kind === 'file' && !(await chrome.extension.isAllowedFileSchemeAccess())) {
+  /*
+   * Chrome gates file:// behind a per-extension toggle and will tell you
+   * whether it is on. Firefox has no such toggle and no such function, so
+   * "cannot ask" is treated as "not blocked" rather than as a refusal — the
+   * read still falls back to asking the user to pick the file if it fails.
+   */
+  if (verdict.kind === 'file' && typeof chrome.extension !== 'undefined'
+      && typeof chrome.extension.isAllowedFileSchemeAccess === 'function'
+      && !(await chrome.extension.isAllowedFileSchemeAccess())) {
     return { tab, code: 'no-file-access' };
   }
   return { tab, kind: verdict.kind };
