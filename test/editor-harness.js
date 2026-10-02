@@ -1,5 +1,5 @@
 /*
- * Quick Edit — end-to-end editor tests.
+ * VibeRevise — end-to-end editor tests.
  *
  * Drives real edit mode over this page's own source, through the same event
  * handlers a keypress goes through. Typing is simulated by dispatching the
@@ -9,7 +9,7 @@
  * the browser's default and do the work themselves, so dispatching the event is
  * the whole story.
  *
- * The file that would be saved is checked with QuickEditEditor.preview(), which
+ * The file that would be saved is checked with VibeReviseEditor.preview(), which
  * returns the spliced bytes without starting a download.
  */
 'use strict';
@@ -17,28 +17,28 @@
 Report.mount('out', 'summary');
 const { line, heading, ok, eq, fail } = Report;
 
-const BR = QuickEditIslands.BR;
+const BR = VibeReviseIslands.BR;
 let SOURCE = '';
 
 // --- simulation helpers -----------------------------------------------------
 
 function islandFor(selector, which) {
   const host = document.querySelector(selector);
-  const islands = host.querySelectorAll('[data-qe-island]');
+  const islands = host.querySelectorAll('[data-vr-island]');
   return islands[which || 0];
 }
 
 // The last run of text in a block — the only place Enter starts a new block.
 function lastIslandFor(selector) {
-  const islands = document.querySelector(selector).querySelectorAll('[data-qe-island]');
+  const islands = document.querySelector(selector).querySelectorAll('[data-vr-island]');
   return islands[islands.length - 1];
 }
 
-function valueOf(island) { return QuickEditIslands.readValue(island); }
+function valueOf(island) { return VibeReviseIslands.readValue(island); }
 
 function caretTo(island, index) {
   island.focus();
-  QuickEditIslands.setCaret(island, index == null ? valueOf(island).length : index);
+  VibeReviseIslands.setCaret(island, index == null ? valueOf(island).length : index);
 }
 
 // Typing: the browser fires beforeinput, mutates, then fires input.
@@ -165,7 +165,7 @@ function onlyChangedInside(edited, span, name) {
 
 async function run() {
   SOURCE = await fetch(location.href).then((r) => r.text());
-  const map = QuickEditMap.build(SOURCE, document);
+  const map = VibeReviseMap.build(SOURCE, document);
 
   heading('setup');
   ok(map.stats.editable > 0, 'the page maps to editable regions (' + map.stats.editable + ')');
@@ -173,18 +173,18 @@ async function run() {
     (r) => r.editable && r.node.data.indexOf('Running') !== -1);
   eq(harnessText.length, 0, 'the harness UI is excluded from the map');
 
-  QuickEditEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
-  QuickEditEditor.setActive(true);
-  ok(QuickEditEditor.isActive(), 'edit mode turns on');
+  VibeReviseEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
+  VibeReviseEditor.setActive(true);
+  ok(VibeReviseEditor.isActive(), 'edit mode turns on');
 
-  const islands = document.querySelectorAll('[data-qe-island]');
+  const islands = document.querySelectorAll('[data-vr-island]');
   eq(islands.length, map.stats.editable, 'one island per editable region');
   ok(Array.prototype.every.call(islands, (el) => el.getAttribute('contenteditable') === 'true'),
      'every island is editable');
 
   heading('no edits');
-  eq(QuickEditEditor.preview(), SOURCE, 'with nothing changed, the file is byte-identical');
-  eq(QuickEditEditor.status().changed, 0, 'and nothing is reported as changed');
+  eq(VibeReviseEditor.preview(), SOURCE, 'with nothing changed, the file is byte-identical');
+  eq(VibeReviseEditor.status().changed, 0, 'and nothing is reported as changed');
 
   heading('typing');
   {
@@ -193,18 +193,18 @@ async function run() {
     ok(typeInto(island, ' Typed.'), 'a keystroke is not blocked');
     eq(valueOf(island), 'A plain paragraph to type into. Typed.', 'the island holds the new text');
 
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     ok(edited.indexOf('A plain paragraph to type into. Typed.') !== -1,
        'the typed text reaches the file');
     onlyChangedInside(edited, span, 'every byte outside the edited region is untouched');
-    eq(QuickEditEditor.status().changed, 1, 'one region is reported as changed');
+    eq(VibeReviseEditor.status().changed, 1, 'one region is reported as changed');
   }
 
   heading('characters that need escaping');
   {
     const island = islandFor('#p4');
     typeInto(island, ' 5 < 6 & 7 > 2');
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     ok(edited.indexOf('5 &lt; 6 &amp; 7 &gt; 2') !== -1,
        'typed angle brackets and ampersands are encoded');
     ok(edited.indexOf('5 < 6 & 7 > 2') === -1, 'and never written raw');
@@ -214,7 +214,7 @@ async function run() {
     ok(after.querySelector('#p4').textContent.indexOf('5 < 6 & 7 > 2') !== -1,
        'and read back as exactly what was typed');
     eq(after.querySelectorAll('#p4 *').length,
-       document.querySelectorAll('#p4 [data-qe-island]').length > 0
+       document.querySelectorAll('#p4 [data-vr-island]').length > 0
          ? new DOMParser().parseFromString(SOURCE, 'text/html').querySelectorAll('#p4 *').length
          : -1,
        'no new elements appeared in that paragraph');
@@ -228,7 +228,7 @@ async function run() {
     ok(ev.defaultPrevented, 'the browser default is cancelled');
     eq(valueOf(island), before + BR, 'a line break is recorded in the island value');
 
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     ok(edited.indexOf('<p id="p1">Hello <br><strong>bold <em>and italic</em></strong> world</p>') !== -1,
        'the <br> lands in the file and the tags beside it do not move');
 
@@ -258,7 +258,7 @@ async function run() {
     ok(unknown.defaultPrevented, 'and an unrecognised input type is refused, not waved through');
 
     eq(valueOf(island), before, 'none of the refused commands changed the text');
-    ok(QuickEditIslands.isClean(island), 'the island still contains only text and <br>');
+    ok(VibeReviseIslands.isClean(island), 'the island still contains only text and <br>');
   }
 
   heading('paste is stripped to plain text');
@@ -268,8 +268,8 @@ async function run() {
     const ev = pasteInto(island, 'pasted words', '<b>pasted</b> <i>words</i>', before.length);
     ok(ev.defaultPrevented, 'the browser default paste is cancelled');
     eq(valueOf(island), before + 'pasted words', 'only the plain text is inserted');
-    ok(QuickEditIslands.isClean(island), 'no elements came in with it');
-    ok(QuickEditEditor.preview().indexOf('<b>pasted</b>') === -1,
+    ok(VibeReviseIslands.isClean(island), 'no elements came in with it');
+    ok(VibeReviseEditor.preview().indexOf('<b>pasted</b>') === -1,
        'the pasted markup never reaches the file');
   }
 
@@ -280,7 +280,7 @@ async function run() {
     pasteInto(island, 'line one\nline two', null, before.length);
     eq(valueOf(island), before + 'line one' + BR + 'line two',
        'newlines in pasted text become line breaks');
-    ok(QuickEditEditor.preview().indexOf('line one<br>line two') !== -1,
+    ok(VibeReviseEditor.preview().indexOf('line one<br>line two') !== -1,
        'and are written as <br>');
   }
 
@@ -292,15 +292,15 @@ async function run() {
     const typed = valueOf(island);
     ok(typed !== original, 'the edit happened');
 
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
     eq(valueOf(island), original, 'undo restores the previous text');
-    ok(QuickEditEditor.preview().indexOf('Smith&nbsp;&amp;&nbsp;Sons, 5 &lt; 6, &#39;quoted&#39;') !== -1,
+    ok(VibeReviseEditor.preview().indexOf('Smith&nbsp;&amp;&nbsp;Sons, 5 &lt; 6, &#39;quoted&#39;') !== -1,
        'and the entities are back to the original bytes');
 
-    QuickEditEditor.redo();
+    VibeReviseEditor.redo();
     eq(valueOf(island), typed, 'redo puts the edit back');
 
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
     eq(valueOf(island), original, 'and undo takes it away again');
   }
 
@@ -313,13 +313,13 @@ async function run() {
 
     typeInto(a, ' A');
     typeInto(b, ' B');
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
     eq(valueOf(b), bBefore, 'undo steps back into the most recent region');
     eq(valueOf(a), aBefore + ' A', 'and leaves the earlier one alone');
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
     eq(valueOf(a), aBefore, 'the next undo steps back into the earlier region');
-    QuickEditEditor.redo();
-    QuickEditEditor.redo();
+    VibeReviseEditor.redo();
+    VibeReviseEditor.redo();
     eq(valueOf(a) + '|' + valueOf(b), (aBefore + ' A') + '|' + (bBefore + ' B'),
        'redo replays both in order');
   }
@@ -336,7 +336,7 @@ async function run() {
   {
     // #p2 was edited and undone, so it is back to its original value and must
     // not be spliced at all.
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     for (const frag of ['Smith&nbsp;&amp;&nbsp;Sons', '5 &lt; 6', '&#39;quoted&#39;']) {
       ok(edited.indexOf(frag) !== -1, 'entity run survives byte-identically: ' + frag);
     }
@@ -351,42 +351,42 @@ async function run() {
 
   heading('leaving edit mode');
   {
-    QuickEditEditor.setActive(false);
-    ok(!QuickEditEditor.isActive(), 'edit mode turns off');
-    const left = document.querySelectorAll('[data-qe-island]');
+    VibeReviseEditor.setActive(false);
+    ok(!VibeReviseEditor.isActive(), 'edit mode turns off');
+    const left = document.querySelectorAll('[data-vr-island]');
     ok(left.length > 0, 'islands holding unsaved edits are kept');
     ok(Array.prototype.every.call(left, (el) => !el.hasAttribute('contenteditable')),
        'but none of them are editable any more');
 
-    QuickEditEditor.setActive(true);
-    ok(Array.prototype.every.call(document.querySelectorAll('[data-qe-island]'),
+    VibeReviseEditor.setActive(true);
+    ok(Array.prototype.every.call(document.querySelectorAll('[data-vr-island]'),
                                  (el) => el.getAttribute('contenteditable') === 'true'),
        'turning edit mode back on re-arms them');
-    QuickEditEditor.setActive(false);
+    VibeReviseEditor.setActive(false);
   }
 
   heading('comments — one that was already in the file');
   {
-    const regions = QuickEditEditor.commentRegions();
+    const regions = VibeReviseEditor.commentRegions();
     const existing = regions.find((r) => r.text === 'this note was already in the file');
     ok(!!existing, 'a comment already in the file is picked up');
     ok(existing && existing.block === document.getElementById('p6'),
        'and is attached to the section that follows it');
-    eq(QuickEditEditor.preview(), QuickEditEditor.preview(),
+    eq(VibeReviseEditor.preview(), VibeReviseEditor.preview(),
        'reading it changes nothing');
-    ok(QuickEditEditor.preview().indexOf('<!-- comment: this note was already in the file -->') !== -1,
+    ok(VibeReviseEditor.preview().indexOf('<!-- comment: this note was already in the file -->') !== -1,
        'and it is still in the file, untouched');
   }
 
   heading('comments — adding one');
   {
-    const before = QuickEditEditor.preview();
-    const region = QuickEditEditor.addCommentTo(document.getElementById('p3'));
+    const before = VibeReviseEditor.preview();
+    const region = VibeReviseEditor.addCommentTo(document.getElementById('p3'));
     ok(!!region, 'a comment was added');
-    eq(QuickEditEditor.preview(), before, 'an empty comment is not written to the file');
+    eq(VibeReviseEditor.preview(), before, 'an empty comment is not written to the file');
 
     writeComment(region, 'needs a figure for Q3');
-    const after = QuickEditEditor.preview();
+    const after = VibeReviseEditor.preview();
     const diff = singleDiff(before, after);
     eq(diff.removed, '', 'adding a comment REPLACES NOTHING — not one byte');
     ok(after.indexOf('<!-- comment: needs a figure for Q3 -->\n  <p id="p3">') !== -1,
@@ -404,36 +404,36 @@ async function run() {
 
   heading('comments — editing and deleting');
   {
-    const regions = QuickEditEditor.commentRegions();
+    const regions = VibeReviseEditor.commentRegions();
     const existing = regions.find((r) => r.original === 'this note was already in the file');
 
     writeComment(existing, 'rewritten note');
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     ok(edited.indexOf('<!-- comment: rewritten note -->') !== -1, 'an existing comment can be rewritten');
     ok(edited.indexOf('this note was already in the file') === -1, 'the old text is gone');
 
-    QuickEditEditor.removeComment(existing);
-    const deleted = QuickEditEditor.preview();
+    VibeReviseEditor.removeComment(existing);
+    const deleted = VibeReviseEditor.preview();
     ok(deleted.indexOf('<!-- comment: rewritten note -->') === -1, 'and it can be deleted');
     ok(deleted.indexOf('<p id="p6">') !== -1, 'the section it was attached to stays');
     ok(deleted.indexOf('\n\n  <p id="p6">') === -1,
        'deleting takes the whole line, leaving no blank gap behind');
 
-    QuickEditEditor.undo();
-    ok(QuickEditEditor.preview().indexOf('<!-- comment: rewritten note -->') !== -1,
+    VibeReviseEditor.undo();
+    ok(VibeReviseEditor.preview().indexOf('<!-- comment: rewritten note -->') !== -1,
        'undo brings a deleted comment back');
-    QuickEditEditor.undo();
-    ok(QuickEditEditor.preview().indexOf('this note was already in the file') !== -1,
+    VibeReviseEditor.undo();
+    ok(VibeReviseEditor.preview().indexOf('this note was already in the file') !== -1,
        'and undoing again puts its original wording back');
-    QuickEditEditor.redo();
+    VibeReviseEditor.redo();
   }
 
   heading('comments — who wrote them');
   {
-    QuickEditEditor.setAuthor('Cara');
-    const region = QuickEditEditor.addCommentTo(document.getElementById('p4'));
+    VibeReviseEditor.setAuthor('Cara');
+    const region = VibeReviseEditor.addCommentTo(document.getElementById('p4'));
     writeComment(region, 'check this figure');
-    const out = QuickEditEditor.preview();
+    const out = VibeReviseEditor.preview();
     ok(/<!-- comment \[Cara \u00b7 \d{4}-\d{2}-\d{2}\]: check this figure -->/.test(out),
        'a comment written with a name set carries the name and the day');
 
@@ -442,16 +442,16 @@ async function run() {
     ok(out.indexOf('<!-- comment: rewritten note -->') !== -1,
        'an existing unsigned note, edited, is not signed with the current name');
 
-    QuickEditEditor.setAuthor('');
-    ok(QuickEditEditor.status().author === '', 'and the name can be cleared again');
-    QuickEditEditor.removeComment(region);
+    VibeReviseEditor.setAuthor('');
+    ok(VibeReviseEditor.status().author === '', 'and the name can be cleared again');
+    VibeReviseEditor.removeComment(region);
   }
 
   heading('comments — a note that would break out of a comment');
   {
-    const region = QuickEditEditor.addCommentTo(document.getElementById('p1'));
+    const region = VibeReviseEditor.addCommentTo(document.getElementById('p1'));
     writeComment(region, 'see --> here, and a trailing dash-');
-    const out = QuickEditEditor.preview();
+    const out = VibeReviseEditor.preview();
 
     // Exactly one "-->" belongs to this comment: the one that closes it.
     const start = out.indexOf('<!-- comment: see');
@@ -464,13 +464,13 @@ async function run() {
 
   heading('comments — replies are notes that share a section');
   {
-    const before = QuickEditEditor.preview();
-    const first = QuickEditEditor.addCommentTo(document.getElementById('p5'));
+    const before = VibeReviseEditor.preview();
+    const first = VibeReviseEditor.addCommentTo(document.getElementById('p5'));
     writeComment(first, 'Is this number right?');
-    const reply = QuickEditEditor.addCommentTo(document.getElementById('p5'));
+    const reply = VibeReviseEditor.addCommentTo(document.getElementById('p5'));
     writeComment(reply, 'Checked it — yes.');
 
-    const out = QuickEditEditor.preview();
+    const out = VibeReviseEditor.preview();
     eq(singleDiff(before, out).removed, '', 'a thread replaces nothing in the file');
 
     const asked = out.indexOf('Is this number right?');
@@ -481,28 +481,28 @@ async function run() {
        'and the whole thread sits before the section it is about');
 
     // Nothing in the file marks a reply; it is one because it shares a block.
-    ok(QuickEditEditor.commentRegions().filter((r) => r.block === document.getElementById('p5'))
+    ok(VibeReviseEditor.commentRegions().filter((r) => r.block === document.getElementById('p5'))
        .length === 2, 'both notes are attached to the same section');
   }
 
   heading('comments — the visible form says the same thing');
   {
-    const hidden = QuickEditEditor.preview();
-    ok(hidden.indexOf('data-qe-comment') === -1, 'notes are invisible by default');
+    const hidden = VibeReviseEditor.preview();
+    ok(hidden.indexOf('data-vr-comment') === -1, 'notes are invisible by default');
 
-    QuickEditEditor.setCommentsVisible(true);
-    const shown = QuickEditEditor.preview();
+    VibeReviseEditor.setCommentsVisible(true);
+    const shown = VibeReviseEditor.preview();
     ok(shown.indexOf('<!-- comment') === -1, 'turning it on leaves no hidden notes behind');
 
     const page = new DOMParser().parseFromString(shown, 'text/html');
-    const notes = page.querySelectorAll('[data-qe-comment]');
+    const notes = page.querySelectorAll('[data-vr-comment]');
     ok(notes.length > 1, 'every note became an element a browser will show (' + notes.length + ')');
     ok(page.body.textContent.indexOf('Is this number right?') !== -1,
-       'and the words are now readable without Quick Edit');
+       'and the words are now readable without VibeRevise');
 
     // The round trip is the whole reason this is safe to offer as a switch.
     const asked = [...notes].find((n) => n.textContent.indexOf('Is this number right?') !== -1);
-    const parsed = QuickEditComments.parseElement(asked);
+    const parsed = VibeReviseComments.parseElement(asked);
     eq(parsed.text, 'Is this number right?', 'the note reads back with its words intact');
     ok(shown.indexOf('style="') !== -1, 'styled inline, so it needs no stylesheet to look right');
     // A double quote anywhere in that style would end the attribute early and
@@ -514,9 +514,9 @@ async function run() {
        'with none of it spilled into the words the reader sees');
 
     // An author survives the trip through the attribute.
-    const signed = [...notes].find((n) => n.getAttribute('data-qe-comment'));
+    const signed = [...notes].find((n) => n.getAttribute('data-vr-comment'));
     if (signed) {
-      const back = QuickEditComments.parseElement(signed);
+      const back = VibeReviseComments.parseElement(signed);
       ok(!!(back.author || back.date), 'and so does who wrote it, and when');
     }
 
@@ -525,7 +525,7 @@ async function run() {
      * saved file has to find the note's own range, start tag to end tag, or it
      * could never be edited, deleted or switched back again.
      */
-    const reopened = QuickEditMap.build(shown, page);
+    const reopened = VibeReviseMap.build(shown, page);
     const tags = reopened.elements.get(asked);
     ok(!!(tags && tags.startTag && tags.endTag),
        'reopening the file finds the note\'s range in it');
@@ -539,14 +539,14 @@ async function run() {
       (r) => r.editable && asked.contains(r.node));
     eq(editableInside.length, 0, 'and it is not offered as editable text as well');
 
-    QuickEditEditor.setCommentsVisible(false);
-    eq(QuickEditEditor.preview(), hidden,
+    VibeReviseEditor.setCommentsVisible(false);
+    eq(VibeReviseEditor.preview(), hidden,
        'and turning it off again restores the file byte for byte');
   }
 
   heading('the file, end to end');
   {
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     const before = new DOMParser().parseFromString(SOURCE, 'text/html');
     const after = new DOMParser().parseFromString(edited, 'text/html');
 
@@ -560,7 +560,7 @@ async function run() {
        'nested inline tags are intact');
     ok(edited.indexOf('<a href="does-not-exist.html" id="link">') !== -1,
        'attributes are intact, quoting and all');
-    ok(edited.indexOf('data-qe-island') === -1,
+    ok(edited.indexOf('data-vr-island') === -1,
        'not one editing wrapper leaked into the file');
     ok(edited.indexOf('contenteditable') === -1,
        'and neither did contenteditable');
@@ -568,22 +568,22 @@ async function run() {
 
   heading('adding a block');
   {
-    QuickEditEditor.setActive(true);
+    VibeReviseEditor.setActive(true);
 
-    const before = QuickEditEditor.preview();
+    const before = VibeReviseEditor.preview();
     const island = islandFor('#p3');
-    const added = QuickEditEditor.addAfterIsland(island);
+    const added = VibeReviseEditor.addAfterIsland(island);
     ok(!!added, 'a block was added');
 
     const p3 = document.getElementById('p3');
     const fresh = p3.nextElementSibling;
     eq(fresh.localName, 'p', 'the new element has the same tag as its neighbour');
     eq(fresh.textContent, '', 'and starts empty');
-    eq(QuickEditEditor.preview(), before,
+    eq(VibeReviseEditor.preview(), before,
        'an added block with nothing typed into it is not written to the file');
 
-    typeInto(fresh.querySelector('[data-qe-island]'), 'A brand new paragraph.');
-    const after = QuickEditEditor.preview();
+    typeInto(fresh.querySelector('[data-vr-island]'), 'A brand new paragraph.');
+    const after = VibeReviseEditor.preview();
     const diff = singleDiff(before, after);
 
     eq(diff.removed, '', 'adding a block REPLACES NOTHING — not one byte');
@@ -596,12 +596,12 @@ async function run() {
 
   heading('adding — id is dropped, class is kept');
   {
-    const before = QuickEditEditor.preview();
-    QuickEditEditor.addAfterIsland(islandFor('#p5'));
+    const before = VibeReviseEditor.preview();
+    VibeReviseEditor.addAfterIsland(islandFor('#p5'));
     const fresh = document.getElementById('p5').nextElementSibling;
-    typeInto(fresh.querySelector('[data-qe-island]'), 'Copied styling.');
+    typeInto(fresh.querySelector('[data-vr-island]'), 'Copied styling.');
 
-    const afterAdd = QuickEditEditor.preview();
+    const afterAdd = VibeReviseEditor.preview();
     eq(singleDiff(before, afterAdd).removed, '', 'still replaces nothing');
     ok(afterAdd.indexOf('\n  <p class="note">Copied styling.</p>') !== -1,
        'the class comes along');
@@ -612,16 +612,16 @@ async function run() {
 
   heading('adding — inside a list');
   {
-    const before = QuickEditEditor.preview();
+    const before = VibeReviseEditor.preview();
     const items = document.querySelectorAll('#list li');
     const first = items[0];
-    QuickEditEditor.addAfterIsland(first.querySelector('[data-qe-island]'));
+    VibeReviseEditor.addAfterIsland(first.querySelector('[data-vr-island]'));
 
     const fresh = first.nextElementSibling;
     eq(fresh.localName, 'li', 'an <li> gets another <li>, not a <p>');
-    typeInto(fresh.querySelector('[data-qe-island]'), 'Inserted item');
+    typeInto(fresh.querySelector('[data-vr-island]'), 'Inserted item');
 
-    const afterAdd = QuickEditEditor.preview();
+    const afterAdd = VibeReviseEditor.preview();
     eq(singleDiff(before, afterAdd).removed, '', 'still replaces nothing');
     ok(afterAdd.indexOf(
          '<li>First item</li>\n    <li>Inserted item</li>\n    <li>Second item</li>') !== -1,
@@ -678,44 +678,44 @@ async function run() {
 
   heading('adding — undo and redo');
   {
-    const before = QuickEditEditor.preview();
+    const before = VibeReviseEditor.preview();
     const countBefore = document.querySelectorAll('#doc p').length;
 
-    QuickEditEditor.addAfterIsland(islandFor('#p3'));
+    VibeReviseEditor.addAfterIsland(islandFor('#p3'));
     const fresh = document.getElementById('p3').nextElementSibling;
-    typeInto(fresh.querySelector('[data-qe-island]'), 'Temporary.');
-    ok(QuickEditEditor.preview() !== before, 'the addition is in the file');
+    typeInto(fresh.querySelector('[data-vr-island]'), 'Temporary.');
+    ok(VibeReviseEditor.preview() !== before, 'the addition is in the file');
 
-    QuickEditEditor.undo();            // the typing
-    QuickEditEditor.undo();            // the block itself
+    VibeReviseEditor.undo();            // the typing
+    VibeReviseEditor.undo();            // the block itself
     eq(document.querySelectorAll('#doc p').length, countBefore,
        'undo takes the added block back out of the page');
-    eq(QuickEditEditor.preview(), before, 'and out of the file');
+    eq(VibeReviseEditor.preview(), before, 'and out of the file');
 
-    QuickEditEditor.redo();            // the block
-    QuickEditEditor.redo();            // the typing
+    VibeReviseEditor.redo();            // the block
+    VibeReviseEditor.redo();            // the typing
     eq(document.querySelectorAll('#doc p').length, countBefore + 1,
        'redo puts it back');
-    ok(QuickEditEditor.preview().indexOf('Temporary.') !== -1, 'with its text');
+    ok(VibeReviseEditor.preview().indexOf('Temporary.') !== -1, 'with its text');
 
-    QuickEditEditor.undo();
-    QuickEditEditor.undo();
-    eq(QuickEditEditor.preview(), before, 'and undo removes it again');
+    VibeReviseEditor.undo();
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), before, 'and undo removes it again');
   }
 
   heading('adding — after a block that was itself added');
   {
-    const before = QuickEditEditor.preview();
+    const before = VibeReviseEditor.preview();
 
-    QuickEditEditor.addAfterIsland(islandFor('#p3'));
+    VibeReviseEditor.addAfterIsland(islandFor('#p3'));
     const firstNew = document.getElementById('p3').nextElementSibling;
-    typeInto(firstNew.querySelector('[data-qe-island]'), 'One.');
+    typeInto(firstNew.querySelector('[data-vr-island]'), 'One.');
 
-    QuickEditEditor.addAfterIsland(firstNew.querySelector('[data-qe-island]'));
+    VibeReviseEditor.addAfterIsland(firstNew.querySelector('[data-vr-island]'));
     const secondNew = firstNew.nextElementSibling;
-    typeInto(secondNew.querySelector('[data-qe-island]'), 'Two.');
+    typeInto(secondNew.querySelector('[data-vr-island]'), 'Two.');
 
-    const afterAdd = QuickEditEditor.preview();
+    const afterAdd = VibeReviseEditor.preview();
     eq(singleDiff(before, afterAdd).removed, '', 'two additions at one anchor still replace nothing');
     ok(afterAdd.indexOf('\n  <p>One.</p>\n  <p>Two.</p>') !== -1,
        'and come out in the order they appear on the page');
@@ -725,9 +725,9 @@ async function run() {
   {
     // Anchor the insertion somewhere known: currentBlock() follows the caret.
     caretTo(islandFor('#p5'), 0);
-    const before = QuickEditEditor.preview();
+    const before = VibeReviseEditor.preview();
 
-    const tree = QuickEditEditor.insertStructure('table');
+    const tree = VibeReviseEditor.insertStructure('table');
     ok(!!tree, 'a table was inserted');
     eq(tree.element.getAttribute('class'), 'grid', 'it took the donor table\'s class');
     eq(tree.cells.length, 6,
@@ -736,7 +736,7 @@ async function run() {
        'and a header row, because the donor has one');
     eq(tree.element.previousElementSibling.id, 'p5', 'it landed after the caret\'s block');
 
-    eq(QuickEditEditor.preview(), before,
+    eq(VibeReviseEditor.preview(), before,
        'a structure nobody has typed into is not written to the file at all');
 
     const cells = tree.cells.map((c) => c.island);
@@ -747,7 +747,7 @@ async function run() {
     typeInto(cells[4], 'Beta');
     typeInto(cells[5], 'two');
 
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     const diff = singleDiff(before, edited);
     eq(diff.removed, '', 'the whole table is one insertion that replaces nothing');
 
@@ -755,7 +755,7 @@ async function run() {
     ok(edited.indexOf('<th>Measure</th>') !== -1, 'header cells are written');
     ok(edited.indexOf('<td>Alpha</td>') !== -1, 'body cells are written');
     ok(edited.indexOf('<td>two</td>') !== -1, 'every row is written');
-    ok(edited.indexOf('data-qe-island') === -1, 'no editing wrapper reached the file');
+    ok(edited.indexOf('data-vr-island') === -1, 'no editing wrapper reached the file');
     // Indented relative to the block it was added after, which sits at two
     // spaces in this document.
     ok(edited.indexOf('\n  <table class="grid">\n    <thead>\n      <tr>\n        <th>Measure</th>') !== -1,
@@ -772,7 +772,7 @@ async function run() {
     island.blur();                       // exactly what pressing a button does
     ok(document.activeElement !== island, 'focus has left the text, as it would');
 
-    const tree = QuickEditEditor.insertStructure('paragraph');
+    const tree = VibeReviseEditor.insertStructure('paragraph');
     ok(!!tree, 'a paragraph was inserted');
     eq(tree.element.previousElementSibling.id, 'p2',
        'and it landed after the block the caret was last in');
@@ -785,13 +785,13 @@ async function run() {
     // offering the menu from the + rather than only from the toolbar.
     caretTo(islandFor('#p3'), 0);          // caret deliberately somewhere else
     const target = document.querySelector('#p1');
-    const tree = QuickEditEditor.insertStructure('bullets', target);
+    const tree = VibeReviseEditor.insertStructure('bullets', target);
     ok(!!tree, 'a list was inserted');
     eq(tree.element.previousElementSibling.id, 'p1',
        'directly after the block it was opened from, not where the caret was');
 
     typeInto(tree.cells[0].island, 'From the plus.');
-    ok(QuickEditEditor.preview().indexOf('<li>From the plus.</li>') !== -1,
+    ok(VibeReviseEditor.preview().indexOf('<li>From the plus.</li>') !== -1,
        'and it reaches the file');
   }
 
@@ -800,32 +800,32 @@ async function run() {
     ok(!document.querySelector('#doc blockquote'),
        'the document has no blockquote to copy');
     caretTo(islandFor('#p3'), 0);
-    const tree = QuickEditEditor.insertStructure('quote');
+    const tree = VibeReviseEditor.insertStructure('quote');
     ok(!!tree, 'a quote was still inserted');
     eq(tree.element.getAttribute('class'), null, 'with no class, because there was none to take');
     eq(tree.cells.length, 1, 'and one run of text to type into');
 
     typeInto(tree.cells[0].island, 'Nothing to copy here.');
-    ok(QuickEditEditor.preview().indexOf('<blockquote>Nothing to copy here.</blockquote>') !== -1,
+    ok(VibeReviseEditor.preview().indexOf('<blockquote>Nothing to copy here.</blockquote>') !== -1,
        'and it is written as a plain blockquote');
   }
 
   heading('inserting a structure — undo takes the whole thing back out');
   {
     caretTo(islandFor('#p3'), 0);
-    const before = QuickEditEditor.preview();
-    const tree = QuickEditEditor.insertStructure('bullets');
+    const before = VibeReviseEditor.preview();
+    const tree = VibeReviseEditor.insertStructure('bullets');
     typeInto(tree.cells[0].island, 'A bullet.');
-    ok(QuickEditEditor.preview().indexOf('<li>A bullet.</li>') !== -1, 'the list is in the file');
+    ok(VibeReviseEditor.preview().indexOf('<li>A bullet.</li>') !== -1, 'the list is in the file');
 
-    QuickEditEditor.undo();       // the typing
-    QuickEditEditor.undo();       // the insertion
+    VibeReviseEditor.undo();       // the typing
+    VibeReviseEditor.undo();       // the insertion
     ok(!tree.element.isConnected, 'undo removed the list from the page');
-    eq(QuickEditEditor.preview(), before, 'and the file is back to what it was');
+    eq(VibeReviseEditor.preview(), before, 'and the file is back to what it was');
 
-    QuickEditEditor.redo();
+    VibeReviseEditor.redo();
     ok(tree.element.isConnected, 'redo put it back');
-    QuickEditEditor.undo();       // leave the document as we found it
+    VibeReviseEditor.undo();       // leave the document as we found it
   }
 
   // Pressing a key on whatever has focus: the editor listens on the document,
@@ -838,36 +838,36 @@ async function run() {
   heading('a freshly inserted thing goes away again on Esc or Delete');
   {
     caretTo(islandFor('#p3'), 0);
-    const before = QuickEditEditor.preview();
+    const before = VibeReviseEditor.preview();
 
-    const table = QuickEditEditor.insertStructure('table');
+    const table = VibeReviseEditor.insertStructure('table');
     ok(table.element.isConnected, 'a table was inserted');
     ok(!press('Escape'), 'Esc was handled rather than left to the page');
     ok(!table.element.isConnected, 'and the table is gone');
-    eq(QuickEditEditor.preview(), before, 'the file is untouched');
+    eq(VibeReviseEditor.preview(), before, 'the file is untouched');
 
     caretTo(islandFor('#p3'), 0);
-    const list = QuickEditEditor.insertStructure('bullets');
+    const list = VibeReviseEditor.insertStructure('bullets');
     ok(list.element.isConnected, 'a list was inserted');
     press('Backspace');
     ok(!list.element.isConnected, 'Backspace removes it too');
 
     caretTo(islandFor('#p3'), 0);
-    const para = QuickEditEditor.insertStructure('paragraph');
+    const para = VibeReviseEditor.insertStructure('paragraph');
     press('Delete');
     ok(!para.element.isConnected, 'and so does Delete');
-    eq(QuickEditEditor.preview(), before, 'after all three, the file is still untouched');
+    eq(VibeReviseEditor.preview(), before, 'after all three, the file is still untouched');
 
     // Undoing a removal is itself undoable, because it went through undo().
-    QuickEditEditor.redo();
+    VibeReviseEditor.redo();
     ok(para.element.isConnected, 'a press made by mistake is recoverable with redo');
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
   }
 
   heading('once something has been typed into it, the keys go back to normal');
   {
     caretTo(islandFor('#p3'), 0);
-    const tree = QuickEditEditor.insertStructure('quote');
+    const tree = VibeReviseEditor.insertStructure('quote');
     typeInto(tree.cells[0].island, 'Mine now.');
 
     ok(press('Escape'), 'Esc is left alone');
@@ -876,8 +876,8 @@ async function run() {
     press('Backspace');
     ok(tree.element.isConnected, 'Backspace stays an ordinary Backspace');
 
-    QuickEditEditor.undo();       // the typing
-    QuickEditEditor.undo();       // the insertion
+    VibeReviseEditor.undo();       // the typing
+    VibeReviseEditor.undo();       // the insertion
   }
 
   heading('an empty added item goes on Delete wherever it is, not only the newest');
@@ -885,9 +885,9 @@ async function run() {
     // The user's case: click back into something they added earlier, find it
     // still empty, press Delete.
     caretTo(islandFor('#p3'), 0);
-    const tree = QuickEditEditor.insertStructure('table');
+    const tree = VibeReviseEditor.insertStructure('table');
     typeInto(islandFor('#p3'), '!');      // something else is now the last thing done
-    const withTyping = QuickEditEditor.preview();
+    const withTyping = VibeReviseEditor.preview();
 
     caretTo(tree.cells[0].island, 0);
     press('Escape');
@@ -895,45 +895,45 @@ async function run() {
 
     ok(!press('Delete'), 'Delete is handled in an empty added table');
     ok(!tree.element.isConnected, 'and the table is removed, though it was not the last thing added');
-    eq(QuickEditEditor.preview(), withTyping, 'nothing else in the file moved');
-    ok(document.activeElement && document.activeElement.hasAttribute('data-qe-island'),
+    eq(VibeReviseEditor.preview(), withTyping, 'nothing else in the file moved');
+    ok(document.activeElement && document.activeElement.hasAttribute('data-vr-island'),
        'the caret lands in the text beside it rather than nowhere');
 
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
     ok(tree.element.isConnected, 'one undo brings it back');
-    QuickEditEditor.redo();
+    VibeReviseEditor.redo();
     ok(!tree.element.isConnected, 'and redo removes it again');
-    QuickEditEditor.undo();               // the removal
-    QuickEditEditor.undo();               // the typing
-    QuickEditEditor.undo();               // the insertion
+    VibeReviseEditor.undo();               // the removal
+    VibeReviseEditor.undo();               // the typing
+    VibeReviseEditor.undo();               // the insertion
   }
 
   heading('the same for a paragraph added with the +');
   {
-    const region = QuickEditEditor.addAfterIsland(islandFor('#p3'));
+    const region = VibeReviseEditor.addAfterIsland(islandFor('#p3'));
     ok(!!region && region.element.isConnected, 'the + added a paragraph');
     typeInto(islandFor('#p3'), '?');      // not the newest any more
     caretTo(region.island, 0);
     press('Delete');
     ok(!region.element.isConnected, 'and Delete in it, empty, removes it');
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
     ok(region.element.isConnected, 'undo brings it back');
-    QuickEditEditor.undo();               // the typing
-    QuickEditEditor.undo();               // the addition
+    VibeReviseEditor.undo();               // the typing
+    VibeReviseEditor.undo();               // the addition
   }
 
   heading('an added paragraph with words in it is not removed');
   {
     caretTo(islandFor('#p3'), 0);
-    const para = QuickEditEditor.insertStructure('paragraph');
+    const para = VibeReviseEditor.insertStructure('paragraph');
     typeInto(para.cells[0].island, 'Kept.');
     typeInto(islandFor('#p3'), '!');
     caretTo(para.cells[0].island, 0);
     press('Delete');
     ok(para.element.isConnected, 'Delete is an ordinary Delete once there are words in it');
-    QuickEditEditor.undo();
-    QuickEditEditor.undo();
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
+    VibeReviseEditor.undo();
+    VibeReviseEditor.undo();
   }
 
   heading('nothing that came from the file is ever removed by a key');
@@ -947,20 +947,20 @@ async function run() {
     press('Delete');
     press('Backspace');
     ok(document.getElementById('p2').isConnected, 'and it is still there, by both keys');
-    QuickEditEditor.undo();
+    VibeReviseEditor.undo();
     eq(valueOf(islandFor('#p2')), value, 'undo puts its words back');
   }
 
   heading('adding — the file still parses to what is on screen');
   {
-    const edited = QuickEditEditor.preview();
+    const edited = VibeReviseEditor.preview();
     const reparsed = new DOMParser().parseFromString(edited, 'text/html');
-    ok(edited.indexOf('data-qe-island') === -1, 'no editing wrapper leaked into the file');
+    ok(edited.indexOf('data-vr-island') === -1, 'no editing wrapper leaked into the file');
     ok(edited.indexOf('contenteditable') === -1, 'and neither did contenteditable');
     // The page carries one block per empty addition that the file deliberately
     // leaves out.
     eq(reparsed.querySelectorAll('#doc p, #doc li').length,
-       document.querySelectorAll('#doc p, #doc li').length - QuickEditEditor.status().emptyAdded,
+       document.querySelectorAll('#doc p, #doc li').length - VibeReviseEditor.status().emptyAdded,
        'the file has the page\'s blocks, less the empty ones it declines to write');
   }
 
@@ -975,7 +975,7 @@ async function run() {
    */
   function withSaveFile(fn) {
     const calls = [];
-    QuickEditEditor.init({ trustSynthetic: true,
+    VibeReviseEditor.init({ trustSynthetic: true,
       source: SOURCE, map, filename: 'editor-test.html',
       saveFile: (text) => { calls.push(text); return fn(text); },
     });
@@ -990,16 +990,16 @@ async function run() {
     // Settle first. Every heading above has edited this page, so the only
     // honest baseline is whatever remains once a save has been allowed to
     // succeed — and the count is then measured as a change from it.
-    await QuickEditEditor.save();
-    const floor = QuickEditEditor.status().unsaved;
+    await VibeReviseEditor.save();
+    const floor = VibeReviseEditor.status().unsaved;
 
     typeInto(island, 'Written. ', 0);
-    eq(QuickEditEditor.status().unsaved, floor + 1, 'there is something to save');
+    eq(VibeReviseEditor.status().unsaved, floor + 1, 'there is something to save');
 
-    await QuickEditEditor.save();
+    await VibeReviseEditor.save();
     eq(calls.length, 2, 'the host was asked to write the file');
     ok(calls[1].indexOf('Written. ') !== -1, 'and was given the edited file');
-    eq(QuickEditEditor.status().unsaved, floor, 'the edit counts as saved');
+    eq(VibeReviseEditor.status().unsaved, floor, 'the edit counts as saved');
   }
 
   heading('saving — a host that cannot write falls back to the download');
@@ -1008,14 +1008,14 @@ async function run() {
     const calls = withSaveFile(() => ({
       ok: false, fallback: true, message: 'the handle went away',
     }));
-    const floor = QuickEditEditor.status().unsaved;
+    const floor = VibeReviseEditor.status().unsaved;
 
     typeInto(island, 'Rescued. ', 0);
-    eq(QuickEditEditor.status().unsaved, floor + 1, 'there is something to save');
+    eq(VibeReviseEditor.status().unsaved, floor + 1, 'there is something to save');
 
-    await QuickEditEditor.save();
+    await VibeReviseEditor.save();
     eq(calls.length, 1, 'the host was asked first');
-    eq(QuickEditEditor.status().unsaved, floor,
+    eq(VibeReviseEditor.status().unsaved, floor,
        'and the download caught the edit rather than losing it');
   }
 
@@ -1026,12 +1026,12 @@ async function run() {
     // the edit stays unsaved and visibly so.
     const island = islandFor('#p3');
     const calls = withSaveFile(() => ({ ok: false, message: 'cancelled' }));
-    const floor = QuickEditEditor.status().unsaved;
+    const floor = VibeReviseEditor.status().unsaved;
 
     typeInto(island, 'Kept. ', 0);
-    await QuickEditEditor.save();
+    await VibeReviseEditor.save();
     eq(calls.length, 1, 'the host was asked');
-    eq(QuickEditEditor.status().unsaved, floor + 1,
+    eq(VibeReviseEditor.status().unsaved, floor + 1,
        'nothing was marked saved, and nothing was downloaded behind the user');
   }
 
@@ -1044,39 +1044,39 @@ async function run() {
      * had plainly succeeded, and the unload warning kept firing over it.
      */
     withSaveFile(() => ({ ok: true, where: 'saved' }));
-    await QuickEditEditor.save();
-    const floor = QuickEditEditor.status().unsaved;
+    await VibeReviseEditor.save();
+    const floor = VibeReviseEditor.status().unsaved;
 
-    const region = QuickEditEditor.addCommentTo(document.getElementById('p2'));
+    const region = VibeReviseEditor.addCommentTo(document.getElementById('p2'));
     writeComment(region, 'temporary note');
-    await QuickEditEditor.save();
-    eq(QuickEditEditor.status().unsaved, floor, 'a new note saves');
-    ok(QuickEditEditor.preview().indexOf('temporary note') !== -1, 'and is in the file');
+    await VibeReviseEditor.save();
+    eq(VibeReviseEditor.status().unsaved, floor, 'a new note saves');
+    ok(VibeReviseEditor.preview().indexOf('temporary note') !== -1, 'and is in the file');
 
-    QuickEditEditor.removeComment(region);
-    eq(QuickEditEditor.status().unsaved, floor + 1, 'deleting it is an unsaved change');
+    VibeReviseEditor.removeComment(region);
+    eq(VibeReviseEditor.status().unsaved, floor + 1, 'deleting it is an unsaved change');
 
-    await QuickEditEditor.save();
-    eq(QuickEditEditor.status().unsaved, floor,
+    await VibeReviseEditor.save();
+    eq(VibeReviseEditor.status().unsaved, floor,
        'and saving settles it, rather than counting for ever');
-    ok(QuickEditEditor.preview().indexOf('temporary note') === -1,
+    ok(VibeReviseEditor.preview().indexOf('temporary note') === -1,
        'the note is gone from the file');
   }
 
   heading('comments — moving the switch is itself an unsaved change');
   {
     withSaveFile(() => ({ ok: true, where: 'saved' }));
-    await QuickEditEditor.save();
-    const floor = QuickEditEditor.status().unsaved;
-    const inFile = QuickEditEditor.commentRegions().length;
+    await VibeReviseEditor.save();
+    const floor = VibeReviseEditor.status().unsaved;
+    const inFile = VibeReviseEditor.commentRegions().length;
     ok(inFile > 0, 'there are notes in the file to rewrite');
 
-    QuickEditEditor.setCommentsVisible(true);
-    eq(QuickEditEditor.status().unsaved, floor + inFile,
+    VibeReviseEditor.setCommentsVisible(true);
+    eq(VibeReviseEditor.status().unsaved, floor + inFile,
        'every note in the file is pending, because every one of them changes');
 
-    QuickEditEditor.setCommentsVisible(false);
-    eq(QuickEditEditor.status().unsaved, floor,
+    VibeReviseEditor.setCommentsVisible(false);
+    eq(VibeReviseEditor.status().unsaved, floor,
        'and moving it back means nothing is pending after all');
   }
 
@@ -1098,12 +1098,12 @@ async function run() {
      * is its business; what matters is that none of it reaches the file.
      */
     const island = islandFor('#p3');
-    const fileBefore = QuickEditEditor.preview();
-    const unsavedBefore = QuickEditEditor.status().unsaved;
+    const fileBefore = VibeReviseEditor.preview();
+    const unsavedBefore = VibeReviseEditor.status().unsaved;
     const calls = withSaveFile(() => ({ ok: true, where: 'saved' }));
 
     // Hostile from here: no trustSynthetic, as in the extension.
-    QuickEditEditor.init({ source: SOURCE, map, filename: 'editor-test.html' });
+    VibeReviseEditor.init({ source: SOURCE, map, filename: 'editor-test.html' });
 
     /*
      * Events only, with no DOM write — which is exactly what a page can do.
@@ -1117,33 +1117,33 @@ async function run() {
         inputType: 'insertText', data: 'INJECTED ', bubbles: true, cancelable: true,
       }));
     }
-    eq(QuickEditEditor.preview(), fileBefore,
+    eq(VibeReviseEditor.preview(), fileBefore,
        'forged input is not recorded as something the user typed');
-    eq(QuickEditEditor.status().unsaved, unsavedBefore,
+    eq(VibeReviseEditor.status().unsaved, unsavedBefore,
        'and is not counted as something the user typed');
 
-    await QuickEditEditor.save();
+    await VibeReviseEditor.save();
     eq(calls.length, 0, 'a forged Ctrl/Cmd+S cannot make the editor save');
 
     press('z', { ctrlKey: true });
     press('y', { ctrlKey: true });
-    eq(QuickEditEditor.preview(), fileBefore,
+    eq(VibeReviseEditor.preview(), fileBefore,
        'and forged undo and redo cannot throw work away or bring it back');
 
     press('Delete');
     press('Backspace');
     press('Escape');
     press('Enter', { ctrlKey: true });
-    eq(QuickEditEditor.preview(), fileBefore,
+    eq(VibeReviseEditor.preview(), fileBefore,
        'nor can Delete, Backspace, Esc or Ctrl+Enter change the file');
 
     // Back to a suite that can drive itself.
-    QuickEditEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
-    eq(QuickEditEditor.preview(), fileBefore, 'and the file is exactly as it was');
+    VibeReviseEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
+    eq(VibeReviseEditor.preview(), fileBefore, 'and the file is exactly as it was');
   }
 
   // Put the editor back the way the rest of the page expects it.
-  QuickEditEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
+  VibeReviseEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
 
   Report.finish();
 }

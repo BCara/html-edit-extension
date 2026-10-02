@@ -1,5 +1,5 @@
 /*
- * Quick Edit — source tokenizer.
+ * VibeRevise — source tokenizer.
  *
  * PURPOSE
  * -------
@@ -16,7 +16,7 @@
  *
  * COMMENTS
  * --------
- * scan() records comments too, as {start, end, data, bogus}. Quick Edit stores
+ * scan() records comments too, as {start, end, data, bogus}. VibeRevise stores
  * a user's notes as ordinary HTML comments — invisible in a browser, plainly
  * readable in a text editor, and carried along whenever the file is sent
  * anywhere — so it needs to find the ones already in a file as well as write
@@ -312,10 +312,10 @@
   // The text spans on their own — by far the most common thing to want.
   function tokenize(source) { return scan(source).spans; }
 
-  root.QuickEditTokenizer = { scan: scan, tokenize: tokenize, readTag: readTag };
+  root.VibeReviseTokenizer = { scan: scan, tokenize: tokenize, readTag: readTag };
 
   // CommonJS, for use outside a browser. The browser global above is what the
   // Chrome extension's injected scripts bind to; `module` is undefined there,
   // so this is skipped and nothing changes for them.
-  if (typeof module !== 'undefined' && module.exports) module.exports = root.QuickEditTokenizer;
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.VibeReviseTokenizer;
 })(typeof self !== 'undefined' ? self : globalThis);

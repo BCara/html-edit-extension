@@ -1,4 +1,4 @@
-# Quick Edit
+# VibeRevise
 
 A Chrome extension for fixing the words in an HTML document without opening a
 code editor. Open it in Chrome, click the icon, edit the text on the page, save.
@@ -14,7 +14,7 @@ save it as a file. The site itself is never written to.
 
 **The saved file is the original file with only the words you changed replaced.**
 
-Quick Edit never re-serialises the DOM. Serialising would hand you Chrome's idea
+VibeRevise never re-serialises the DOM. Serialising would hand you Chrome's idea
 of your file — re-indented, attributes re-quoted, comments dropped, entities
 rewritten — instead of what you actually wrote. Instead it keeps the original
 source text as a string, tracks the exact character range each editable text
@@ -36,9 +36,9 @@ Only for `file://` documents. A document served over http(s) needs none of this:
 skip to [Using it](#using-it).
 
 Chrome does not let extensions read `file://` URLs unless you say so, per
-extension. Without it Quick Edit cannot read your file at all.
+extension. Without it VibeRevise cannot read your file at all.
 
-1. On `chrome://extensions`, click **Details** under Quick Edit.
+1. On `chrome://extensions`, click **Details** under VibeRevise.
 2. Turn on **Allow access to file URLs**.
 3. Reload any local HTML file you already had open.
 
@@ -49,7 +49,7 @@ failing silently.
 
 1. Open an `.html` file in Chrome — from disk, or from a server on your own
    network.
-2. Click the Quick Edit icon, then **Start editing**.
+2. Click the VibeRevise icon, then **Start editing**.
 3. Click any run of text and type. Editable text highlights faintly as you
    hover; the region you are in gets a solid outline, and anything you have
    changed stays tinted so you can see your own edits at a glance.
@@ -92,7 +92,7 @@ Each one is **copied from the nearest one already in the document**. A table
 takes that table's `class` and its column count, and gets a header row only if
 the one it was copied from has one. That is not a shortcut — it is the only way
 the result can be expected to look right. The document's stylesheet is not
-Quick Edit's to touch, so an inserted element has to be the kind of element the
+VibeRevise's to touch, so an inserted element has to be the kind of element the
 stylesheet already has an opinion about.
 
 Where the document has nothing of that kind to copy, you get a plain one with no
@@ -145,7 +145,7 @@ shows them plainly, and an AI you hand the file back to reads them. Anyone just
 viewing the page in a browser sees none of it.
 
 Comments already in a file show up when you open it, so a note someone left you
-comes through. Comments that are *not* Quick Edit's — a build tool's boilerplate,
+comes through. Comments that are *not* VibeRevise's — a build tool's boilerplate,
 a conditional comment — are never shown and never touched. Delete a comment with
 the `×` on its card; a comment left empty is not written at all.
 
@@ -159,7 +159,7 @@ the `×` on its card; a comment left empty is not written at all.
 
 ### Marking up a page on the web
 
-Quick Edit also works on an ordinary website, with one difference that is not
+VibeRevise also works on an ordinary website, with one difference that is not
 negotiable: **you are editing a copy.** The site is never written to, nothing
 is sent anywhere, and Save gives you the edited HTML as a file. The popup says
 so before you start.
@@ -174,7 +174,7 @@ It works on pages whose text is in the HTML the server sent — documentation,
 articles, most server-rendered sites. It does **not** work on a page built in
 the browser, because the file the server sent has almost none of the text in
 it. That is not a bug that can be fixed: there is nothing in the source to
-edit. Quick Edit detects it and says so rather than offering an editor that
+edit. VibeRevise detects it and says so rather than offering an editor that
 does nothing.
 
 Write-back stays private-only. A server on your own network may accept a save;
@@ -196,7 +196,7 @@ Reading the page asks the browser for the bytes it already has
 (`cache: 'force-cache'`), but a response marked no-store will still be fetched
 again. A second request is harmless on an ordinary page and is not harmless on
 a single-use URL — a sign-in link, a confirmation link, a one-time download —
-so do not point Quick Edit at one of those.
+so do not point VibeRevise at one of those.
 
 ### Saving
 
@@ -207,7 +207,7 @@ change someone else made in the meantime, and the server keeps timestamped
 backups. See [server/README.md](server/README.md) — it is one dependency-free
 file to drop into an Express app.
 
-Otherwise Save writes a file. Where the browser allows it, Quick Edit asks once
+Otherwise Save writes a file. Where the browser allows it, VibeRevise asks once
 where to put it — pre-filled with the document's own name — and every save after
 that goes to the same file with no dialog. Choosing the original file is how you
 overwrite it, and that is your explicit choice rather than something that
@@ -232,14 +232,14 @@ would throw away every unsaved edit.
 | `file:///*` — **optional** | Lets the service worker open the file itself. Not granted at install: the popup asks for it on a button press, Chrome shows its own consent prompt, and declining costs you one click per file instead. |
 
 There is no required `host_permissions`, no `storage`, and no network access of
-any kind. Quick Edit makes no requests, contains no AI, and sends your document
+any kind. VibeRevise makes no requests, contains no AI, and sends your document
 nowhere.
 
 ### Why reading a local file is awkward
 
 A content script cannot read the file it is running on. In Manifest V3 its
 `fetch()` carries the *page's* origin, and a `file://` page is not allowed to
-read `file://` URLs — it fails with a bare "Failed to fetch". So Quick Edit
+read `file://` URLs — it fails with a bare "Failed to fetch". So VibeRevise
 tries three routes, in order of how little they ask of you:
 
 1. **The service worker fetches it**, with the extension's own privileges. Needs
@@ -247,7 +247,7 @@ tries three routes, in order of how little they ask of you:
 2. **The content script fetches it.** Only works if Chrome was started with
    `--allow-file-access-from-files`. Tried because it costs nothing.
 3. **You choose the file.** Needs no permission at all, so this one always
-   works. Quick Edit checks the filename matches and that the contents line up
+   works. VibeRevise checks the filename matches and that the contents line up
    with the page before trusting it.
 
 The popup's details panel says which route was used.
@@ -318,7 +318,7 @@ offset.
   is editable and no one can say why is a bad experience. Private addresses are
   where documents-served-as-files actually live; public origins are
   overwhelmingly applications. See `src/lib/origins.js`.
-- **The only markup Quick Edit writes** is a `<br>` from a line break, the blocks
+- **The only markup VibeRevise writes** is a `<br>` from a line break, the blocks
   and structures you explicitly add, and the `<!-- comment: -->` notes you
   write. All of it appears only where you asked for it, and none of it is ever
   produced by re-serialising something you wrote.
@@ -341,7 +341,7 @@ offset.
 - **UTF-8 only.** A file declaring another charset is detected and refused
   rather than silently corrupted.
 - **Reading the file may need a click.** If you decline the optional permission,
-  Quick Edit asks you to choose the file each time — see above for why.
+  VibeRevise asks you to choose the file each time — see above for why.
 - **A few text nodes are never editable**: anything inside `<script>`, `<style>`,
   `<head>`, `<title>`, `<template>`, `<noscript>` or `<textarea>`; whitespace
   between tags; and text the parser stitched together from several places in the
@@ -381,7 +381,7 @@ manifest.json           permissions, with the justification for each
 src/background.js       service worker: injection, downloads, toolbar badge
 src/content.js          reads the source, builds the map, routes messages
 src/editor.js           edit mode: constraints, history, status bar, saving
-src/lib/origins.js      which documents Quick Edit will touch, and why
+src/lib/origins.js      which documents VibeRevise will touch, and why
 src/lib/structures.js   inserted tables and lists, cloned from the document
 src/lib/mapping.js      character ranges <-> DOM text nodes, verified
 src/lib/islands.js      the contenteditable wrappers and their values

@@ -1,5 +1,5 @@
 /*
- * Quick Edit — service worker.
+ * VibeRevise — service worker.
  *
  * Two jobs, and neither is caching anyone's document.
  *
@@ -7,7 +7,7 @@
  *      real Add to Home Screen for a page with a manifest and a worker.
  *   2. Make it work offline. That is not a nicety here — the whole premise is
  *      that your file never leaves the browser, so needing a network to edit
- *      it would be a strange contradiction. Once loaded, Quick Edit works on a
+ *      it would be a strange contradiction. Once loaded, VibeRevise works on a
  *      plane.
  *
  * Only the app's own shell is cached: its markup, styles and the editor. The
@@ -17,7 +17,7 @@
 
 // Bump this to retire the previous cache. It is the app's shell version, not
 // the extension's.
-const CACHE = 'quick-edit-shell-v2';
+const CACHE = 'viberevise-shell-v2';
 
 const SHELL = [
   'index.html',

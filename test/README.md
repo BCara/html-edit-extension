@@ -72,7 +72,7 @@ Applied to every fixture:
 `editor-test.html` **is** the document under test. It fetches its own source,
 builds the offset map over itself, and runs real edit mode on it — which is
 exactly what the extension does to a local file. The harness's own output is
-inside an element marked `data-quick-edit-ui`, which the map excludes, so the
+inside an element marked `data-viberevise-ui`, which the map excludes, so the
 test scaffolding never becomes editable text.
 
 Typing is simulated by dispatching `beforeinput`, performing the mutation the
@@ -81,7 +81,7 @@ browser would have performed, then dispatching `input` — the exact contract
 simulated at all: those paths cancel the browser's default and do the work
 themselves, so dispatching the event is the whole story.
 
-The file that *would* be saved is inspected with `QuickEditEditor.preview()`,
+The file that *would* be saved is inspected with `VibeReviseEditor.preview()`,
 which returns the spliced bytes without starting a download.
 
 | Check | Claim |
@@ -110,8 +110,8 @@ worth doing once with your own eyes.
 **A file you did not edit must save byte-identical.**
 
 1. Open a fixture from a `file://` URL, e.g.
-   `file:///path/to/quick-edit/test/fixtures/messy.html`
-2. Click the Quick Edit icon and turn on edit mode.
+   `file:///path/to/viberevise/test/fixtures/messy.html`
+2. Click the VibeRevise icon and turn on edit mode.
 3. Change **nothing**. Save.
 4. Save it somewhere other than over the original, then compare:
 

@@ -1,5 +1,5 @@
 /*
- * Quick Edit — adding a block.
+ * VibeRevise — adding a block.
  *
  * Everything here is about answering one question: if the user asks for "another
  * one of these", what exactly gets written into the file, and at which offset?
@@ -122,7 +122,7 @@
     return open + inner + '</' + template.tag + '>';
   }
 
-  root.QuickEditBlocks = {
+  root.VibeReviseBlocks = {
     blockFor: blockFor,
     anchorFor: anchorFor,
     templateFor: templateFor,

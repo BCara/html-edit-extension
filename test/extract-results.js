@@ -22,7 +22,7 @@ while ((m = re.exec(dom)) !== null) {
   if (m[1] === 'head') console.log('\n' + text);
   else console.log(text);
 }
-const v = /QE-RESULT: [^<]*/.exec(dom);
+const v = /VR-RESULT: [^<]*/.exec(dom);
 if (v) verdict = v[0];
 // No verdict means the page never finished: it failed to load, or crashed
 // before reporting. Say which page, since "non-zero" alone looks the same as

@@ -68,8 +68,8 @@ run_page() {
   local status=$?
 
   if [ "$status" -eq 2 ]; then
-    cp "$dom" "/tmp/quick-edit-$(basename "$page").html" 2>/dev/null
-    echo "TESTS DID NOT REPORT — DOM dump copied to /tmp/quick-edit-$(basename "$page").html"
+    cp "$dom" "/tmp/viberevise-$(basename "$page").html" 2>/dev/null
+    echo "TESTS DID NOT REPORT — DOM dump copied to /tmp/viberevise-$(basename "$page").html"
     echo "--- chrome stderr ---"
     tail -20 "$WORK/chrome.log"
     return 1

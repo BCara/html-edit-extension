@@ -1,5 +1,5 @@
 /*
- * Quick Edit — try save-in-place without touching a real server.
+ * VibeRevise — try save-in-place without touching a real server.
  *
  * Serves a directory over http with the save route mounted, so you can walk the
  * whole loop — open, edit, Save to server, confirm the bytes on disk — before
@@ -16,7 +16,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const quickEditSave = require('./quick-edit-save.js');
+const vibeReviseSave = require('./viberevise-save.js');
 
 const root = path.resolve(process.argv[2] || process.cwd());
 const port = Number(process.argv[3] || 8099);
@@ -32,7 +32,7 @@ const TYPES = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
 };
 
-const save = quickEditSave({ root, keepBackups: 5 });
+const save = vibeReviseSave({ root, keepBackups: 5 });
 
 http.createServer((req, res) => {
   save(req, res, () => {
@@ -66,14 +66,14 @@ http.createServer((req, res) => {
           }).join('\n');
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end('<!doctype html><meta charset="utf-8"><title>Index</title>' +
-                '<h1>Quick Edit demo server</h1><ul>' + items + '</ul>');
+                '<h1>VibeRevise demo server</h1><ul>' + items + '</ul>');
         return;
       }
 
       res.writeHead(200, {
         'Content-Type': TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
         'Content-Length': stat.size,
-        ETag: quickEditSave.statTag(stat),
+        ETag: vibeReviseSave.statTag(stat),
         'Last-Modified': stat.mtime.toUTCString(),
         'Cache-Control': 'public, max-age=0',
       });
@@ -82,11 +82,11 @@ http.createServer((req, res) => {
     });
   });
 }).listen(port, () => {
-  console.log('Quick Edit demo server');
+  console.log('VibeRevise demo server');
   console.log('  serving   ' + root);
   console.log('  at        http://localhost:' + port + '/');
-  console.log('  save      PUT is enabled; backups in .quick-edit-backups/');
+  console.log('  save      PUT is enabled; backups in .viberevise-backups/');
   console.log('');
-  console.log('Open a .html file from that URL in Chrome, click the Quick Edit');
+  console.log('Open a .html file from that URL in Chrome, click the VibeRevise');
   console.log('icon, and the button should read "Save to server".');
 });

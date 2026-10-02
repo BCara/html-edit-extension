@@ -1,5 +1,5 @@
 /*
- * Quick Edit — content script.
+ * VibeRevise — content script.
  *
  * Owns the document's original bytes and the offset map, and answers the
  * popup's requests. The editing itself lives in editor.js; this file is the
@@ -24,11 +24,11 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.11.1';
+  var VERSION = '0.12.0';
   var REQUIRED = [
-    'QuickEditTokenizer', 'QuickEditMap', 'QuickEditSplice',
-    'QuickEditIslands', 'QuickEditBlocks', 'QuickEditStructures',
-    'QuickEditComments', 'QuickEditPrompt', 'QuickEditEditor',
+    'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
+    'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',
+    'VibeReviseComments', 'VibeRevisePrompt', 'VibeReviseEditor',
   ];
 
   function missingModules() {
@@ -36,31 +36,31 @@
   }
 
   var SKEW_MESSAGE =
-    'Quick Edit is out of step with itself. Open chrome://extensions, press ' +
-    'the reload arrow on the Quick Edit card, then reload this page.';
+    'VibeRevise is out of step with itself. Open chrome://extensions, press ' +
+    'the reload arrow on the VibeRevise card, then reload this page.';
 
   // A previous version left its globals in this world. Re-running would not
   // help — the stale modules are already loaded — so ask for a page reload.
-  if (window.__quickEditContentLoaded) {
-    if (window.__quickEditVersion !== VERSION) {
-      console.warn('[Quick Edit] version ' + VERSION + ' was injected over ' +
-                   window.__quickEditVersion + '. ' + SKEW_MESSAGE);
-      window.__quickEditSkew = SKEW_MESSAGE;
+  if (window.__vibeReviseContentLoaded) {
+    if (window.__vibeReviseVersion !== VERSION) {
+      console.warn('[VibeRevise] version ' + VERSION + ' was injected over ' +
+                   window.__vibeReviseVersion + '. ' + SKEW_MESSAGE);
+      window.__vibeReviseSkew = SKEW_MESSAGE;
     }
     return;
   }
-  window.__quickEditContentLoaded = true;
-  window.__quickEditVersion = VERSION;
+  window.__vibeReviseContentLoaded = true;
+  window.__vibeReviseVersion = VERSION;
 
   var missing = missingModules();
   if (missing.length) {
-    console.error('[Quick Edit] these modules were never injected: ' +
+    console.error('[VibeRevise] these modules were never injected: ' +
                   missing.join(', ') + '. ' + SKEW_MESSAGE);
   }
 
-  var Editor = window.QuickEditEditor;
-  var Prompt = window.QuickEditPrompt;
-  var Origins = window.QuickEditOrigins;
+  var Editor = window.VibeReviseEditor;
+  var Prompt = window.VibeRevisePrompt;
+  var Origins = window.VibeReviseOrigins;
 
   var state = {
     source: null,     // original file text, verbatim
@@ -211,7 +211,7 @@
       return r.text();
     }).catch(function (err) {
       state.readError = { ok: false, code: 'served-fetch-failed', message: String(err && err.message || err) };
-      console.log('[Quick Edit] could not re-fetch this document:', err && err.message);
+      console.log('[VibeRevise] could not re-fetch this document:', err && err.message);
       return chooseSource();
     });
   }
@@ -241,13 +241,13 @@
   function readSource(url) {
     if (isServed()) return readServed(url);
 
-    return send({ type: 'quickEdit:readFile', url: url }).then(function (res) {
+    return send({ type: 'vibeRevise:readFile', url: url }).then(function (res) {
       if (res && res.ok) {
         state.readVia = 'service worker';
         return res.text;
       }
       state.readError = res;
-      console.log('[Quick Edit] service worker could not read the file:', res);
+      console.log('[VibeRevise] service worker could not read the file:', res);
 
       return fetch(url).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -256,7 +256,7 @@
         state.readVia = 'page fetch';
         return text;
       }).catch(function (pageErr) {
-        console.log('[Quick Edit] page fetch could not read the file either:', pageErr.message);
+        console.log('[VibeRevise] page fetch could not read the file either:', pageErr.message);
         return chooseSource();
       });
     });
@@ -265,9 +265,9 @@
   function chooseSource() {
     var wanted = filename();
     return Prompt.chooseFile({
-      title: 'Quick Edit needs to read this file',
+      title: 'VibeRevise needs to read this file',
       body: 'Chrome will not let an extension open a local file on its own. ' +
-            'Choose this same file and Quick Edit can get to work.' +
+            'Choose this same file and VibeRevise can get to work.' +
             (Prompt.canHandle
               ? ' Saving will then write straight back to it, rather than '
                 + 'downloading a copy.'
@@ -314,7 +314,7 @@
     if (!state.handle) return Promise.resolve(Prompt.canHandle ? writeFn() : null);
     return Prompt.canWrite(state.handle).then(function (allowed) {
       if (!allowed) {
-        console.log('[Quick Edit] the file handle is read-only; Save will ask for one');
+        console.log('[VibeRevise] the file handle is read-only; Save will ask for one');
         state.handle = null;
       }
       return writeFn();
@@ -346,7 +346,7 @@
         // Losing the handle mid-session — the file moved, the permission
         // lapsed — must not lose the edits with it. fallback:true tells the
         // editor to download instead of reporting a dead end.
-        console.warn('[Quick Edit] writing through the handle failed:', err);
+        console.warn('[VibeRevise] writing through the handle failed:', err);
         state.handle = null;
         return { ok: false, fallback: true, message: err && err.message || String(err) };
       });
@@ -378,13 +378,13 @@
   // corrupt every non-ASCII character. Detect the obvious cases and refuse.
   function encodingProblem(source) {
     if (source.indexOf('\ufffd') !== -1) {
-      return 'This file does not appear to be valid UTF-8. Quick Edit would corrupt it, so editing is disabled.';
+      return 'This file does not appear to be valid UTF-8. VibeRevise would corrupt it, so editing is disabled.';
     }
     var meta = /<meta[^>]+charset\s*=\s*["']?\s*([\w-]+)/i.exec(source.slice(0, 4096));
     if (meta) {
       var cs = meta[1].toLowerCase();
       if (cs !== 'utf-8' && cs !== 'utf8') {
-        return 'This file declares charset "' + meta[1] + '". Quick Edit only handles UTF-8.';
+        return 'This file declares charset "' + meta[1] + '". VibeRevise only handles UTF-8.';
       }
     }
     return null;
@@ -414,12 +414,12 @@
      * On the open web this is the ordinary case rather than a malfunction, and
      * it deserves a sentence that says so. A page built in the browser serves
      * a near-empty shell; the text on screen was never in the file, so there
-     * is nothing for Quick Edit to edit and no amount of retrying will help.
+     * is nothing for VibeRevise to edit and no amount of retrying will help.
      */
     if (isCopy()) {
       return 'This page is built in the browser, so the file the server sent has ' +
              'almost none of this text in it — only ' + mapped + ' of ' + candidates +
-             ' regions line up. Quick Edit works on pages whose text is in the HTML: ' +
+             ' regions line up. VibeRevise works on pages whose text is in the HTML: ' +
              'documentation, articles, and most server-rendered sites.';
     }
     return 'This file does not match the page — only ' + mapped + ' of ' + candidates +
@@ -467,7 +467,7 @@
       var problem = encodingProblem(source);
       if (problem) throw new Error(problem);
 
-      var map = window.QuickEditMap.build(source, document);
+      var map = window.VibeReviseMap.build(source, document);
       var mismatch = coverageProblem(map);
       if (mismatch) throw new Error(mismatch);
 
@@ -489,7 +489,7 @@
         state.canWriteFile = !!saveFile;
         state.writesInPlace = !!state.handle;
         state.ready = true;
-        console.log('[Quick Edit] read via ' + state.readVia + ' —',
+        console.log('[VibeRevise] read via ' + state.readVia + ' —',
                     map.stats.editable, 'editable regions', map.stats,
                     state.writesInPlace ? '— Save writes over the file'
                       : state.canWriteFile ? '— Save will ask once where to write'
@@ -522,20 +522,20 @@
   }
 
   var HANDLERS = {
-    'quickEdit:ping': function () { return Promise.resolve({ ready: true }); },
+    'vibeRevise:ping': function () { return Promise.resolve({ ready: true }); },
 
-    'quickEdit:scan': function () {
+    'vibeRevise:scan': function () {
       return ensureReady().then(function () { return report(); });
     },
 
-    'quickEdit:toggle': function (msg) {
+    'vibeRevise:toggle': function (msg) {
       return ensureReady().then(function () {
         Editor.setActive(typeof msg.active === 'boolean' ? msg.active : !Editor.isActive());
         return report();
       });
     },
 
-    'quickEdit:save': function () {
+    'vibeRevise:save': function () {
       return ensureReady().then(function () {
         return Editor.save();
       }).then(function () { return report(); });
@@ -550,14 +550,14 @@
     // Answer skew with an explanation rather than letting it surface as a
     // TypeError from whichever module happens to be missing.
     var gone = missingModules();
-    if (gone.length && msg.type !== 'quickEdit:ping') {
+    if (gone.length && msg.type !== 'vibeRevise:ping') {
       sendResponse({ ok: false, code: 'version-skew', message: SKEW_MESSAGE, missing: gone });
       return true;
     }
 
     handler(msg).then(sendResponse).catch(function (err) {
       var message = String(err && err.message || err);
-      console.warn('[Quick Edit]', err);
+      console.warn('[VibeRevise]', err);
       sendResponse({
         ok: false,
         code: message === 'cancelled' ? 'cancelled' : 'error',
@@ -568,5 +568,5 @@
     return true;   // response is async
   });
 
-  console.log('[Quick Edit] ready on', location.href);
+  console.log('[VibeRevise] ready on', location.href);
 })();

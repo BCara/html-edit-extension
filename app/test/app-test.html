@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Quick Edit — web app tests</title>
+<title>VibeRevise — web app tests</title>
 <!--
   Loads the real app in a frame and drives it, because the thing worth testing
   is the app as shipped: its own index.html, its own script tags, the iframe it
@@ -17,7 +17,7 @@
   #summary { margin-top: 1rem; padding-top: .7rem; border-top: 1px solid #ddd; font-weight: 700; }
 </style>
 
-<h1 style="font:600 15px system-ui">Quick Edit — web app tests</h1>
+<h1 style="font:600 15px system-ui">VibeRevise — web app tests</h1>
 <div id="out">Running…</div>
 <div id="summary"></div>
 <iframe id="app" src="../index.html"></iframe>
@@ -44,7 +44,7 @@ const SAMPLE = [
 
 function afterFrameLoad(frame) {
   return new Promise((resolve) => {
-    if (frame.contentWindow && frame.contentWindow.__quickEditApp) return resolve();
+    if (frame.contentWindow && frame.contentWindow.__vibeReviseApp) return resolve();
     frame.addEventListener('load', () => setTimeout(resolve, 60), { once: true });
   });
 }
@@ -53,12 +53,12 @@ async function run() {
   const frame = document.getElementById('app');
   await afterFrameLoad(frame);
   const W = frame.contentWindow;
-  const app = W.__quickEditApp;
+  const app = W.__vibeReviseApp;
 
   heading('the app loads');
   ok(!!app, 'the app booted and exposed its test hook');
-  ok(!!W.QuickEditEditor, 'the editor is present');
-  ok(!!W.QuickEditStructures, 'so are the structures');
+  ok(!!W.VibeReviseEditor, 'the editor is present');
+  ok(!!W.VibeReviseStructures, 'so are the structures');
 
   heading('opening a file');
   await app.load(SAMPLE, 'sample.html', null);
@@ -77,16 +77,16 @@ async function run() {
 
   heading('editing writes the file the user opened');
   {
-    const islands = inner.querySelectorAll('[data-qe-island]');
+    const islands = inner.querySelectorAll('[data-vr-island]');
     ok(islands.length > 0, 'the document has editable regions');
 
     // Type the way the editor's own suite does: beforeinput, mutate, input.
-    const island = [...islands].find((i) => W.QuickEditIslands.readValue(i).includes('Revenue grew'));
+    const island = [...islands].find((i) => W.VibeReviseIslands.readValue(i).includes('Revenue grew'));
     ok(!!island, 'found the paragraph to edit');
-    W.QuickEditIslands.writeValue(island, 'Revenue grew by 18% over the quarter.');
+    W.VibeReviseIslands.writeValue(island, 'Revenue grew by 18% over the quarter.');
     island.dispatchEvent(new W.Event('input', { bubbles: true }));
 
-    const out = W.QuickEditEditor.preview();
+    const out = W.VibeReviseEditor.preview();
     const a = SAMPLE.split('\n'), b = out.split('\n');
     const differing = a.map((l, i) => l === b[i] ? null : i).filter((i) => i !== null);
 
@@ -96,7 +96,7 @@ async function run() {
     ok(out.includes('<!-- build: do not hand-edit -->'), 'the comment survived');
     ok(out.includes('&#39;on track&#39;'), 'the entities survived');
     ok(out.includes('<tr><td>Smith'), 'no <tbody> was invented');
-    ok(!out.includes('data-qe-island'), 'no editing wrapper reached the file');
+    ok(!out.includes('data-vr-island'), 'no editing wrapper reached the file');
   }
 
   heading('settings kept in this browser');

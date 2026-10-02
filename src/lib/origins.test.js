@@ -1,5 +1,5 @@
 /*
- * Quick Edit — origins tests. Pure functions, no DOM.
+ * VibeRevise — origins tests. Pure functions, no DOM.
  *   node src/lib/origins.test.js
  */
 'use strict';
@@ -14,7 +14,7 @@ const headers = (o) => ({ get: (k) => {
   return hit ? o[hit] : null;
 } });
 
-section('classify — what Quick Edit will touch');
+section('classify — what VibeRevise will touch');
 for (const [url, want] of [
   ['file:///home/c/a.html', 'file'],
   ['file:///home/c/a.txt', null],

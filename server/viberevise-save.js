@@ -1,14 +1,14 @@
 /*
- * Quick Edit — save-in-place for a static file server.
+ * VibeRevise — save-in-place for a static file server.
  *
- * Drop this beside whatever serves your documents and Quick Edit's Save button
+ * Drop this beside whatever serves your documents and VibeRevise's Save button
  * writes the file back over the network instead of dropping a copy in your
  * Downloads folder.
  *
- *   const quickEditSave = require('./quick-edit-save');
+ *   const vibeReviseSave = require('./viberevise-save');
  *   const ROOT = '/volume1/nas-raw';
  *
- *   app.use('/nas-raw', quickEditSave({ root: ROOT }));   // PUT + OPTIONS
+ *   app.use('/nas-raw', vibeReviseSave({ root: ROOT }));   // PUT + OPTIONS
  *   app.use('/nas-raw', express.static(ROOT));            // GET, as before
  *
  * Order does not actually matter — express.static only answers GET and HEAD and
@@ -43,7 +43,7 @@
  *
  * BACKUPS
  * -------
- * Every write copies the previous version into `.quick-edit-backups/` beside
+ * Every write copies the previous version into `.viberevise-backups/` beside
  * the file first, timestamped, keeping the most recent `keepBackups`. Saving a
  * document in place is the one operation here that can lose work, so it never
  * happens without a way back.
@@ -56,7 +56,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const HTML_EXT = /\.x?html?$/i;
-const BACKUP_DIR = '.quick-edit-backups';
+const BACKUP_DIR = '.viberevise-backups';
 
 /*
  * The ETag express.static would produce for this file: weak, size and mtime in
@@ -194,7 +194,7 @@ async function writeAtomic(file, buf) {
 }
 
 /*
- * quickEditSave({ root, maxBytes, keepBackups, allowRemote, logger })
+ * vibeReviseSave({ root, maxBytes, keepBackups, allowRemote, logger })
  *
  * root         directory the documents live in. Required.
  * maxBytes     largest document accepted. Default 25 MB.
@@ -202,10 +202,10 @@ async function writeAtomic(file, buf) {
  * allowRemote  accept writes from public addresses too. Default false.
  * logger       called with one line per write. Default console.log.
  */
-function quickEditSave(options) {
+function vibeReviseSave(options) {
   const opts = options || {};
   const root = opts.root;
-  if (!root) throw new Error('quickEditSave: `root` is required');
+  if (!root) throw new Error('vibeReviseSave: `root` is required');
   const maxBytes = opts.maxBytes || 25 * 1024 * 1024;
   const keepBackups = opts.keepBackups === undefined ? 10 : opts.keepBackups;
   const allowRemote = !!opts.allowRemote;
@@ -218,7 +218,7 @@ function quickEditSave(options) {
 
     if (req.method !== 'PUT' && req.method !== 'OPTIONS') return done();
 
-    // OPTIONS is Quick Edit's capability probe. Answering it is what makes the
+    // OPTIONS is VibeRevise's capability probe. Answering it is what makes the
     // Save button say "Save to server" instead of quietly downloading.
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
@@ -248,7 +248,7 @@ function quickEditSave(options) {
       }
 
       // Conditional write. A client that sends no validator is trusted to know
-      // what it is doing; Quick Edit always sends one.
+      // what it is doing; VibeRevise always sends one.
       const currentTag = statTag(target.stat);
       const ifMatch = req.headers['if-match'];
       const ifUnmodified = req.headers['if-unmodified-since'];
@@ -280,7 +280,7 @@ function quickEditSave(options) {
       const after = await fsp.stat(target.file);
       const tag = statTag(after);
       if (log) {
-        log('[quick-edit] wrote ' + target.file + ' (' + body.length + ' bytes) from ' +
+        log('[viberevise] wrote ' + target.file + ' (' + body.length + ' bytes) from ' +
             remote + (backup ? ', backup ' + path.basename(backup) : ''));
       }
       send(res, 200, {
@@ -293,11 +293,11 @@ function quickEditSave(options) {
       });
     })().catch((err) => {
       const status = err && err.status ? err.status : 500;
-      if (log) log('[quick-edit] save failed: ' + (err && err.message));
+      if (log) log('[viberevise] save failed: ' + (err && err.message));
       if (!res.headersSent) send(res, status, { error: String(err && err.message || err) });
     });
   };
 }
 
-module.exports = quickEditSave;
+module.exports = vibeReviseSave;
 module.exports.statTag = statTag;

@@ -1,5 +1,5 @@
 /*
- * Quick Edit — editable islands.
+ * VibeRevise — editable islands.
  *
  * Each editable text node is wrapped in its own <span contenteditable>, so a
  * region of text is exactly one source span and one editing surface. The
@@ -22,7 +22,7 @@
   'use strict';
 
   var BR = '\u0001';
-  var ATTR = 'data-qe-island';
+  var ATTR = 'data-vr-island';
 
   function wrap(node) {
     var span = node.ownerDocument.createElement('span');
@@ -161,7 +161,7 @@
     sel.addRange(range);
   }
 
-  root.QuickEditIslands = {
+  root.VibeReviseIslands = {
     BR: BR,
     ATTR: ATTR,
     wrap: wrap,

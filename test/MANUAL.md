@@ -30,7 +30,7 @@ Throughout, `QE/` means wherever you unzipped this folder.
 3. Click **Load unpacked** and select the `QE/` folder (the one containing
    `manifest.json`).
 
-**Expected:** a "Quick Edit" card appears with an indigo I-beam icon, version
+**Expected:** a "VibeRevise" card appears with an indigo I-beam icon, version
 0.1.0, and **no red "Errors" button**.
 
 > If there is an Errors button, click it and send me what it says — that would
@@ -49,19 +49,19 @@ it rather than silently do nothing.
 There are **two separate permissions** here and they are easy to confuse:
 
 - **Allow access to file URLs** — a toggle on `chrome://extensions`. Without it
-  Quick Edit cannot touch local files at all. This section.
+  VibeRevise cannot touch local files at all. This section.
 - **`file:///*` host access** — an optional permission the popup asks for with a
-  button. Without it Quick Edit still works, but has to ask you to choose the
+  button. Without it VibeRevise still works, but has to ask you to choose the
   file each time. Section 3.
 
-1. Still on `chrome://extensions`, click **Details** under Quick Edit.
+1. Still on `chrome://extensions`, click **Details** under VibeRevise.
 2. Turn on **Allow access to file URLs**.
 
 **First, though, check the diagnostic works.** Before turning it on:
 
 1. Open `QE/test/fixtures/simple.html` in Chrome — File → Open File, or drag it
    into a tab. The address bar should read `file:///.../simple.html`.
-2. Click the Quick Edit icon.
+2. Click the VibeRevise icon.
 
 **Expected:** an orange panel saying *"File access is turned off"* with numbered
 instructions and an **Open extension settings** button.
@@ -72,7 +72,7 @@ Now turn the setting on, reload the `simple.html` tab, and continue.
 
 ## 3. The second permission
 
-With `simple.html` open and reloaded, click the Quick Edit icon.
+With `simple.html` open and reloaded, click the VibeRevise icon.
 
 **Expected on the very first use:**
 
@@ -105,7 +105,7 @@ simple.html
 [ Start editing ]
 ```
 
-Expand **What Quick Edit found**. Alongside the counts there is a **Read via**
+Expand **What VibeRevise found**. Alongside the counts there is a **Read via**
 row — this is the one I most want to hear about:
 
 - `read directly` — the service worker opened the file. Best case.
@@ -215,7 +215,7 @@ On any fixture, in edit mode:
 | Type `<b>` and `&` into a paragraph, save | The file contains `&lt;b&gt;` and `&amp;`, never a raw `<`. The page still shows `<b>` as text |
 | Press **Enter** mid-paragraph | The line breaks. Saved file gains one `<br>` at that spot and nothing else |
 | Copy some **bold text from a web page**, paste it in | Only the plain words arrive — no bold, no tags. Check the saved file has no `<b>`/`<span>` |
-| Press `Ctrl`/`Cmd`+`B` | Nothing happens. The pill flashes *"Quick Edit changes words, not formatting"* |
+| Press `Ctrl`/`Cmd`+`B` | Nothing happens. The pill flashes *"VibeRevise changes words, not formatting"* |
 | Drag an image or text into the page | Refused, with a message in the pill |
 | Click a link | Does not navigate. Pill says *"Links do not navigate while edit mode is on"* |
 | `Ctrl`/`Cmd`+`Z` several times, then `Ctrl`/`Cmd`+`Shift`+`Z` | Undo walks back through your edits across different paragraphs; redo replays them. The change count updates as you go |
@@ -279,7 +279,7 @@ the section it belongs to, indented to match.
 *without* edit mode on:
 
 ✅ **Expect:** the page looks exactly as it always did. No note is visible to a
-reader. Now click Quick Edit and start editing: your comments come back.
+reader. Now click VibeRevise and start editing: your comments come back.
 
 Also worth trying: open `test/fixtures/comments-doctype.html` and turn on edit
 mode.
@@ -323,7 +323,7 @@ cd QE && git checkout test/fixtures/simple.html   # if you cloned it
 
 Open DevTools (F12) → Console **on the document tab**, then save.
 
-**Expected:** `[Quick Edit] saved via blob URL`
+**Expected:** `[VibeRevise] saved via blob URL`
 
 Also acceptable: `saved via data URL`. That means the first path was rejected
 and the fallback took over — worth telling me about, but it still works.
@@ -349,6 +349,6 @@ Scrolling and typing should feel normal.
 
 - Which step, and what you saw instead
 - The output of the failing `git diff --no-index`
-- Anything red in the page Console (F12) — filter for `Quick Edit`
+- Anything red in the page Console (F12) — filter for `VibeRevise`
 - Anything under **Errors** on the `chrome://extensions` card, and the
   service-worker log (click **service worker** on that card)

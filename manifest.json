@@ -1,13 +1,13 @@
 {
-  // Quick Edit — edit the visible text of an HTML document, local or served
+  // VibeRevise — edit the visible text of an HTML document, local or served
   // from your own network, and save it with the markup untouched.
   //
   // Chrome's manifest parser accepts // comments; they are stripped before the
   // JSON is read. Every permission below is here because a specific feature
   // cannot work without it — see the justification on each one.
   "manifest_version": 3,
-  "name": "Quick Edit",
-  "version": "0.11.1",
+  "name": "VibeRevise",
+  "version": "0.12.0",
   "description": "Edit the visible text of an HTML document — local, or served from your own network — and save it without disturbing the markup.",
 
   "permissions": [
@@ -50,14 +50,14 @@
   // read file:// URLs. The read therefore has to happen in the service worker,
   // which needs host access to the file scheme.
   //
-  // It is optional rather than required so that installing Quick Edit grants it
+  // It is optional rather than required so that installing VibeRevise grants it
   // nothing. If the service worker turns out to need it, the popup asks for it
   // with a button and Chrome shows its own consent prompt. If it is refused, or
   // if the service worker cannot read file URLs at all, the extension falls
   // back to asking the user to choose the file — which needs no permission.
   "optional_host_permissions": ["file:///*"],
 
-  // Network: none. Quick Edit sends nothing anywhere.
+  // Network: none. VibeRevise sends nothing anywhere.
   //
   // Reading local files ALSO requires the user to tick "Allow access to file
   // URLs" on chrome://extensions. That is a separate, user-granted toggle, not
@@ -68,7 +68,7 @@
   },
 
   "action": {
-    "default_title": "Quick Edit",
+    "default_title": "VibeRevise",
     "default_popup": "src/popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",

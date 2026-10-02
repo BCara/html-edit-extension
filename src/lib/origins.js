@@ -1,7 +1,7 @@
 /*
- * Quick Edit — what will we touch?
+ * VibeRevise — what will we touch?
  *
- * One place decides which documents Quick Edit is willing to edit, because the
+ * One place decides which documents VibeRevise is willing to edit, because the
  * answer is a security boundary and a correctness boundary at the same time,
  * and it needs to read the same in the service worker and in the popup.
  *
@@ -29,7 +29,7 @@
  *
  * WHAT CAN GO WRONG ON A PUBLIC PAGE, AND WHY IT IS SAFE
  * -----------------------------------------------------
- * The thing Quick Edit relies on — the bytes it re-fetched being the bytes the
+ * The thing VibeRevise relies on — the bytes it re-fetched being the bytes the
  * browser parsed — is routinely false on the open web. A page built in the
  * browser serves a near-empty shell, so the source has none of the text that
  * is on screen. A page rendered per request returns something different the
@@ -182,7 +182,7 @@
     return /(^|,)\s*PUT\s*(,|$)/i.test(headers.get('Allow') || '');
   }
 
-  root.QuickEditOrigins = {
+  root.VibeReviseOrigins = {
     classify: classify,
     isEditable: isEditable,
     mayWriteBack: mayWriteBack,
@@ -191,5 +191,5 @@
     acceptsWriteBack: acceptsWriteBack,
   };
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = root.QuickEditOrigins;
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.VibeReviseOrigins;
 })(typeof self !== 'undefined' ? self : globalThis);

@@ -1,5 +1,5 @@
 /*
- * Quick Edit — popup.
+ * VibeRevise — popup.
  *
  * Turns edit mode on and off, and carries the file-access diagnostic, which is
  * the single most likely reason for the extension to look broken: without
@@ -118,9 +118,9 @@ function renderProblem(res) {
   footEl.textContent = '';
 
   if (res.code === 'version-skew') {
-    show('<b>Quick Edit needs reloading.</b>' +
+    show('<b>VibeRevise needs reloading.</b>' +
          '<ol><li>Open the extension settings below</li>' +
-         '<li>Press the <b>reload</b> arrow on the Quick Edit card</li>' +
+         '<li>Press the <b>reload</b> arrow on the VibeRevise card</li>' +
          '<li>Reload this page</li></ol>', 'warn');
     fileAccessEl.hidden = false;
     return;
@@ -136,16 +136,16 @@ function renderProblem(res) {
   if (res.code === 'not-editable') {
     // Say which rule was not met, rather than restating all of them.
     if (res.reason === 'not-html') {
-      show('Quick Edit needs an HTML document — a path ending in ' +
+      show('VibeRevise needs an HTML document — a path ending in ' +
            '<code>.html</code> or <code>.htm</code>.');
     } else {
-      show('Quick Edit works on local HTML files and on HTML served from your own ' +
+      show('VibeRevise works on local HTML files and on HTML served from your own ' +
            'network. This page is neither.');
     }
     return;
   }
   if (res.code === 'no-file-access') {
-    show('<b>File access is turned off.</b> Chrome will not let Quick Edit read local ' +
+    show('<b>File access is turned off.</b> Chrome will not let VibeRevise read local ' +
          'files until you allow it:' +
          '<ol><li>Open the extension settings below</li>' +
          '<li>Turn on <b>Allow access to file URLs</b></li>' +
@@ -181,7 +181,7 @@ function ask(message) {
 }
 
 function refreshGrantOffer() {
-  chrome.runtime.sendMessage({ type: 'quickEdit:hasFilePermission' }, (res) => {
+  chrome.runtime.sendMessage({ type: 'vibeRevise:hasFilePermission' }, (res) => {
     if (chrome.runtime.lastError) return;
     grantEl.hidden = !!(res && res.granted);
   });
@@ -212,29 +212,29 @@ document.getElementById('grant-btn').addEventListener('click', () => {
     grantEl.hidden = true;
     // Either way, carry on: if it was refused, the read falls back to the
     // picker, which is a perfectly good answer.
-    ask({ type: 'quickEdit:inspect' });
+    ask({ type: 'vibeRevise:inspect' });
   });
 });
 
 document.getElementById('skip-btn').addEventListener('click', () => {
   grantEl.hidden = true;
-  ask({ type: 'quickEdit:inspect' });
+  ask({ type: 'vibeRevise:inspect' });
 });
 
 toggleEl.addEventListener('click', () => {
   toggleEl.disabled = true;
-  ask({ type: 'quickEdit:toggle' });
+  ask({ type: 'vibeRevise:toggle' });
 });
 
 saveEl.addEventListener('click', () => {
   saveEl.disabled = true;
   // The OS Save dialog opens over the page, which closes the popup.
-  ask({ type: 'quickEdit:save' });
+  ask({ type: 'vibeRevise:save' });
   window.close();
 });
 
 document.getElementById('open-extensions').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'quickEdit:openExtensionsPage' });
+  chrome.runtime.sendMessage({ type: 'vibeRevise:openExtensionsPage' });
   window.close();
 });
 
@@ -242,17 +242,17 @@ document.getElementById('open-extensions').addEventListener('click', () => {
  * On open: if the file permission is already granted, go straight to scanning.
  * If not, offer it once before doing anything that would need it.
  */
-chrome.runtime.sendMessage({ type: 'quickEdit:classifyActive' }, (info) => {
+chrome.runtime.sendMessage({ type: 'vibeRevise:classifyActive' }, (info) => {
   // A document served over http(s) is read with an ordinary same-origin fetch,
   // so none of the file:// permission machinery applies to it. Going straight
   // to the scan is not a shortcut — there is genuinely nothing to ask for.
   if (chrome.runtime.lastError || !info || info.kind !== 'file') {
-    ask({ type: 'quickEdit:inspect' });
+    ask({ type: 'vibeRevise:inspect' });
     return;
   }
-  chrome.runtime.sendMessage({ type: 'quickEdit:hasFilePermission' }, (res) => {
+  chrome.runtime.sendMessage({ type: 'vibeRevise:hasFilePermission' }, (res) => {
     if (chrome.runtime.lastError || (res && res.granted)) {
-      ask({ type: 'quickEdit:inspect' });
+      ask({ type: 'vibeRevise:inspect' });
     } else {
       showSetup();
     }

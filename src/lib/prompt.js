@@ -1,7 +1,7 @@
 /*
- * Quick Edit — in-page prompt.
+ * VibeRevise — in-page prompt.
  *
- * A small card in the corner of the document, used when Quick Edit needs
+ * A small card in the corner of the document, used when VibeRevise needs
  * something from the user before it can do anything: at the moment, that means
  * asking them to choose the file when Chrome will not let the extension read it
  * on its own.
@@ -11,12 +11,12 @@
  *
  * Like the status bar, it renders inside a closed shadow root so the page's
  * stylesheet cannot reach it and its own styles cannot leak out, and it is
- * tagged data-quick-edit-ui so the offset map never treats it as content.
+ * tagged data-viberevise-ui so the offset map never treats it as content.
  */
 (function (root) {
   'use strict';
 
-  var UI_ATTR = 'data-quick-edit-ui';
+  var UI_ATTR = 'data-viberevise-ui';
 
   var CSS = [
     ':host { all: initial; }',
@@ -176,7 +176,7 @@
             // and must not look like one. Anything else means this browser
             // would not do it, so fall back rather than strand them.
             if (err && err.name === 'AbortError') return;
-            console.log('[Quick Edit] the file picker would not give a handle:', err);
+            console.log('[VibeRevise] the file picker would not give a handle:', err);
             viaInput();
           });
       });
@@ -228,7 +228,7 @@
       types: PICKER_TYPES,
     }).catch(function (err) {
       if (err && err.name === 'AbortError') return null;
-      console.log('[Quick Edit] the save picker would not give a handle:', err);
+      console.log('[VibeRevise] the save picker would not give a handle:', err);
       return null;
     });
   }
@@ -240,7 +240,7 @@
     });
   }
 
-  root.QuickEditPrompt = {
+  root.VibeRevisePrompt = {
     chooseFile: chooseFile,
     saveAs: saveAs,
     canWrite: canWrite,

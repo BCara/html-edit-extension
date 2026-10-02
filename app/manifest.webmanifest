@@ -1,6 +1,6 @@
 {
-  "name": "Quick Edit — fix the words, keep the file",
-  "short_name": "Quick Edit",
+  "name": "VibeRevise — fix the words, keep the file",
+  "short_name": "VibeRevise",
   "description": "Edit the text of an HTML document and save it with the markup untouched.",
   "id": "/app/",
   "start_url": "index.html",

@@ -1,5 +1,5 @@
 /*
- * Quick Edit — a static server for the built app.
+ * VibeRevise — a static server for the built app.
  *
  * dist/ is plain static files, so anything that serves a directory will do;
  * this exists so there is one command to run, and something a service manager
@@ -141,5 +141,5 @@ http.createServer((req, res) => {
     fs.createReadStream(file).pipe(res);
   });
 }).listen(PORT, HOST, () => {
-  console.log('Quick Edit serving ' + ROOT + ' on http://' + HOST + ':' + PORT);
+  console.log('VibeRevise serving ' + ROOT + ' on http://' + HOST + ':' + PORT);
 });

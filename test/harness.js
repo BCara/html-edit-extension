@@ -1,5 +1,5 @@
 /*
- * Quick Edit — offset mapping test suite.
+ * VibeRevise — offset mapping test suite.
  *
  * Run it in a browser (see test/README.md) or headlessly via test/run.sh.
  *
@@ -71,13 +71,13 @@ function isInCode(node) {
   for (let p = node.parentNode; p; p = p.parentNode) {
     if (p.nodeType === 11) return true;                     // <template> content
     const tag = (p.tagName || '').toUpperCase();
-    if (QuickEditMap.BLOCKED.indexOf(tag) !== -1) return true;
+    if (VibeReviseMap.BLOCKED.indexOf(tag) !== -1) return true;
   }
   return false;
 }
 
 function textsOf(doc) {
-  return QuickEditMap.collectTextNodes(doc).map((n) => n.data);
+  return VibeReviseMap.collectTextNodes(doc).map((n) => n.data);
 }
 
 function loadFixture(name) {
@@ -99,7 +99,7 @@ function loadFixture(name) {
  * and the exact text-node list the rewritten source should parse back into.
  */
 function editEverything(source, doc, transform) {
-  const map = QuickEditMap.build(source, doc);
+  const map = VibeReviseMap.build(source, doc);
   const edits = [];
   const expected = map.records.map((r) => {
     if (!r.editable) return r.node.data;
@@ -107,11 +107,11 @@ function editEverything(source, doc, transform) {
     edits.push({
       start: r.span.start,
       end: r.span.end,
-      replacement: QuickEditSplice.replacementFor(r.span, next),
+      replacement: VibeReviseSplice.replacementFor(r.span, next),
     });
     return next;
   });
-  return { map, edits, expected, edited: QuickEditSplice.applyEdits(source, edits) };
+  return { map, edits, expected, edited: VibeReviseSplice.applyEdits(source, edits) };
 }
 
 const arraysEqualAt = (a, b) => {
@@ -130,7 +130,7 @@ function commonChecks(fx) {
   const { name, source, doc } = fx;
 
   // 1. The tokenizer's spans are self-consistent and strictly ordered.
-  const spans = QuickEditTokenizer.tokenize(source);
+  const spans = VibeReviseTokenizer.tokenize(source);
   let consistent = true, ordered = true, prevEnd = 0;
   for (const s of spans) {
     if (source.slice(s.start, s.end) !== s.raw) consistent = false;
@@ -142,7 +142,7 @@ function commonChecks(fx) {
 
   // 2. Every text node in the real DOM is accounted for: either mapped to a
   //    source span, or positively identified as a parser-merged run.
-  const map = QuickEditMap.build(source, doc);
+  const map = VibeReviseMap.build(source, doc);
   const unexplained = map.records.filter((r) => !r.span && r.reason !== 'merged-spans');
   ok(unexplained.length === 0,
      'every DOM text node is accounted for in the source',
@@ -170,12 +170,12 @@ function commonChecks(fx) {
   // 3. Each pair round-trips: source bytes, decoded the way the parser decodes,
   //    equal the text the browser actually put in the DOM.
   const bad = map.records.filter(
-    (r) => r.span && QuickEditMap.expectedText(r.span) !== r.node.data);
+    (r) => r.span && VibeReviseMap.expectedText(r.span) !== r.node.data);
   ok(bad.length === 0, 'every mapped span decodes to its node text',
      bad.length + ' mismatched');
 
   // 4. THE core guarantee: no edits means no change, byte for byte.
-  eq(QuickEditSplice.applyEdits(source, []), source,
+  eq(VibeReviseSplice.applyEdits(source, []), source,
      'a file with no edits is byte-identical');
 
   // 5. Edit every editable region, including characters that must be escaped,
@@ -248,13 +248,13 @@ function commonChecks(fx) {
 // --- fixture-specific checks ------------------------------------------------
 
 function editOne(source, doc, predicate, transform) {
-  const map = QuickEditMap.build(source, doc);
+  const map = VibeReviseMap.build(source, doc);
   const target = map.records.find((r) => r.editable && predicate(r.node.data));
   if (!target) return null;
-  const replacement = QuickEditSplice.replacementFor(target.span, transform(target.node.data));
+  const replacement = VibeReviseSplice.replacementFor(target.span, transform(target.node.data));
   return {
     target,
-    edited: QuickEditSplice.applyEdits(source, [
+    edited: VibeReviseSplice.applyEdits(source, [
       { start: target.span.start, end: target.span.end, replacement },
     ]),
   };
@@ -308,7 +308,7 @@ const SPECIFIC = {
   },
 
   'messy.html'(fx) {
-    const map = QuickEditMap.build(fx.source, fx.doc);
+    const map = VibeReviseMap.build(fx.source, fx.doc);
 
     // Unclosed <P>: a start tag, no end tag.
     const firstP = fx.doc.querySelector('p');
@@ -331,9 +331,9 @@ const SPECIFIC = {
     if (maths) {
       ok(maths.node.data.indexOf('5 < 6 and 7 > 6') !== -1,
          'a bare "<" in running text is treated as text, not markup');
-      const edited = QuickEditSplice.applyEdits(fx.source, [{
+      const edited = VibeReviseSplice.applyEdits(fx.source, [{
         start: maths.span.start, end: maths.span.end,
-        replacement: QuickEditSplice.replacementFor(maths.span, maths.node.data),
+        replacement: VibeReviseSplice.replacementFor(maths.span, maths.node.data),
       }]);
       ok(edited.indexOf("alt='A cat, sitting > lying'") !== -1,
          'a ">" inside a single-quoted attribute does not end the tag');
@@ -343,7 +343,7 @@ const SPECIFIC = {
   },
 
   'scripty.html'(fx) {
-    const map = QuickEditMap.build(fx.source, fx.doc);
+    const map = VibeReviseMap.build(fx.source, fx.doc);
     const editableInCode = map.records.filter((r) => {
       if (!r.editable) return false;
       for (let p = r.node.parentNode; p; p = p.parentNode) {
@@ -372,7 +372,7 @@ const SPECIFIC = {
   },
 
   'pre-template.html'(fx) {
-    const map = QuickEditMap.build(fx.source, fx.doc);
+    const map = VibeReviseMap.build(fx.source, fx.doc);
     const inTemplate = map.records.filter(
       (r) => r.editable && r.node.data.indexOf('Template text') !== -1);
     eq(inTemplate.length, 0, '<template> content is mapped but not editable');
@@ -393,9 +393,9 @@ const SPECIFIC = {
          'the newline the parser eats after <pre> is not part of the node text');
       eq(fx.source.charAt(pre.span.start - 1), '\n',
          'that eaten newline sits just outside the mapped span');
-      const edited = QuickEditSplice.applyEdits(fx.source, [{
+      const edited = VibeReviseSplice.applyEdits(fx.source, [{
         start: pre.span.start, end: pre.span.end,
-        replacement: QuickEditSplice.replacementFor(pre.span, 'FIRST line of preformatted text\n  indented second line\nlast line'),
+        replacement: VibeReviseSplice.replacementFor(pre.span, 'FIRST line of preformatted text\n  indented second line\nlast line'),
       }]);
       ok(edited.indexOf('<pre>\nFIRST line') !== -1,
          'editing a <pre> keeps the eaten newline in the file');
@@ -419,16 +419,16 @@ const SPECIFIC = {
 
   'large.html'(fx) {
     const t0 = performance.now();
-    const map = QuickEditMap.build(fx.source, fx.doc);
+    const map = VibeReviseMap.build(fx.source, fx.doc);
     const buildMs = performance.now() - t0;
 
     // Saving is the other half of "stays responsive": splice every region at once.
     const t1 = performance.now();
     const all = map.records.filter((r) => r.editable).map((r) => ({
       start: r.span.start, end: r.span.end,
-      replacement: QuickEditSplice.replacementFor(r.span, r.node.data + '.'),
+      replacement: VibeReviseSplice.replacementFor(r.span, r.node.data + '.'),
     }));
-    const edited = QuickEditSplice.applyEdits(fx.source, all);
+    const edited = VibeReviseSplice.applyEdits(fx.source, all);
     const spliceMs = performance.now() - t1;
 
     line('pass', '        (' + fx.source.length.toLocaleString() + ' chars, ' +
@@ -469,7 +469,7 @@ function elementChecks() {
     const src = '<!doctype html><body><div id="outer">a<div id="inner">b</div>c</div>' +
                 '<div id="after">d</div>';
     const doc = parse(src);
-    const map = QuickEditMap.build(src, doc);
+    const map = VibeReviseMap.build(src, doc);
 
     const outer = doc.getElementById('outer');
     const inner = doc.getElementById('inner');
@@ -490,7 +490,7 @@ function elementChecks() {
   {
     const src = '<!doctype html><body><p>a<br>b</p><img src="x.png"><p>c</p>';
     const doc = parse(src);
-    const map = QuickEditMap.build(src, doc);
+    const map = VibeReviseMap.build(src, doc);
 
     const br = doc.querySelector('br');
     const brRange = map.elements.get(br);
@@ -507,7 +507,7 @@ function elementChecks() {
   {
     const src = '<!doctype html><html><body><table><tr><td>cell</td></tr></table></body></html>';
     const doc = parse(src);
-    const map = QuickEditMap.build(src, doc);
+    const map = VibeReviseMap.build(src, doc);
 
     eq(map.elements.get(doc.querySelector('tbody')), undefined,
        'the invented <tbody> is not paired');
@@ -527,7 +527,7 @@ function elementChecks() {
  * document exactly as it was.
  */
 async function islandChecks() {
-  const BR = QuickEditIslands.BR;
+  const BR = VibeReviseIslands.BR;
 
   heading('islands — DOM mechanics');
   {
@@ -538,12 +538,12 @@ async function islandChecks() {
     document.body.appendChild(box);
 
     const before = box.innerHTML;
-    const islands = QuickEditMap.collectTextNodes(box).map((n) => QuickEditIslands.wrap(n));
+    const islands = VibeReviseMap.collectTextNodes(box).map((n) => VibeReviseIslands.wrap(n));
     ok(box.innerHTML !== before, 'wrapping does change the live DOM');
-    ok(box.querySelectorAll('[data-qe-island]').length === islands.length,
+    ok(box.querySelectorAll('[data-vr-island]').length === islands.length,
        'every text node got its own island');
 
-    islands.forEach(QuickEditIslands.unwrap);
+    islands.forEach(VibeReviseIslands.unwrap);
     eq(box.innerHTML, before, 'unwrapping restores the live DOM exactly');
     box.remove();
   }
@@ -553,48 +553,48 @@ async function islandChecks() {
     const el = document.createElement('span');
     document.body.appendChild(el);
 
-    QuickEditIslands.writeValue(el, 'one' + BR + 'two');
+    VibeReviseIslands.writeValue(el, 'one' + BR + 'two');
     eq(el.innerHTML, 'one<br>two', 'a line break in a value is a <br> in the DOM');
-    eq(QuickEditIslands.readValue(el), 'one' + BR + 'two', 'and reads back as it was written');
+    eq(VibeReviseIslands.readValue(el), 'one' + BR + 'two', 'and reads back as it was written');
 
-    QuickEditIslands.writeValue(el, '');
+    VibeReviseIslands.writeValue(el, '');
     eq(el.childNodes.length, 0, 'an emptied island really is empty');
-    eq(QuickEditIslands.readValue(el), '', 'and reads back as empty');
+    eq(VibeReviseIslands.readValue(el), '', 'and reads back as empty');
 
-    QuickEditIslands.writeValue(el, 'a' + BR + BR + 'b');
-    eq(QuickEditIslands.readValue(el), 'a' + BR + BR + 'b', 'consecutive breaks survive');
+    VibeReviseIslands.writeValue(el, 'a' + BR + BR + 'b');
+    eq(VibeReviseIslands.readValue(el), 'a' + BR + BR + 'b', 'consecutive breaks survive');
 
     // A stray element (a paste that got past the interceptor) keeps its words.
     el.appendChild(document.createElement('b')).textContent = 'pasted';
-    eq(QuickEditIslands.readValue(el), 'a' + BR + BR + 'bpasted',
+    eq(VibeReviseIslands.readValue(el), 'a' + BR + BR + 'bpasted',
        'a stray element is read as its text, so nothing is lost');
-    ok(!QuickEditIslands.isClean(el), 'and is reported as needing flattening');
+    ok(!VibeReviseIslands.isClean(el), 'and is reported as needing flattening');
 
-    QuickEditIslands.writeValue(el, QuickEditIslands.readValue(el));
-    ok(QuickEditIslands.isClean(el), 'flattening removes the element but keeps the words');
+    VibeReviseIslands.writeValue(el, VibeReviseIslands.readValue(el));
+    ok(VibeReviseIslands.isClean(el), 'flattening removes the element but keeps the words');
 
-    QuickEditIslands.writeValue(el, 'abcdef');
-    QuickEditIslands.setCaret(el, 3);
-    eq(QuickEditIslands.caretIndex(el), 3, 'the caret index round-trips through text');
+    VibeReviseIslands.writeValue(el, 'abcdef');
+    VibeReviseIslands.setCaret(el, 3);
+    eq(VibeReviseIslands.caretIndex(el), 3, 'the caret index round-trips through text');
 
-    QuickEditIslands.writeValue(el, 'ab' + BR + 'cd');
-    QuickEditIslands.setCaret(el, 4);
-    eq(QuickEditIslands.caretIndex(el), 4, 'the caret index round-trips across a <br>');
+    VibeReviseIslands.writeValue(el, 'ab' + BR + 'cd');
+    VibeReviseIslands.setCaret(el, 4);
+    eq(VibeReviseIslands.caretIndex(el), 4, 'the caret index round-trips across a <br>');
     el.remove();
   }
 
   heading('islands — a whole document, wrapped and unwrapped');
   {
     const fx = await loadFixture('nested-inline.html');
-    const map = QuickEditMap.build(fx.source, fx.doc);
+    const map = VibeReviseMap.build(fx.source, fx.doc);
     const before = fx.doc.documentElement.outerHTML;
 
     const islands = map.records
       .filter((r) => r.editable)
-      .map((r) => QuickEditIslands.wrap(r.node));
+      .map((r) => VibeReviseIslands.wrap(r.node));
     ok(islands.length > 0, 'the fixture produced islands (' + islands.length + ')');
 
-    islands.forEach(QuickEditIslands.unwrap);
+    islands.forEach(VibeReviseIslands.unwrap);
     eq(fx.doc.documentElement.outerHTML, before,
        'turning edit mode on and off with no changes leaves the document untouched');
   }
@@ -602,15 +602,15 @@ async function islandChecks() {
   heading('write-back — a single edit in a real file');
   {
     const fx = await loadFixture('nested-inline.html');
-    const map = QuickEditMap.build(fx.source, parse(fx.source));
+    const map = VibeReviseMap.build(fx.source, parse(fx.source));
     const target = map.records.find((r) => r.editable && r.node.data === ' world');
     ok(!!target, 'found the " world" region');
     if (target) {
       const value = ' pla' + BR + 'net';
-      const edited = QuickEditSplice.applyEdits(fx.source, [{
+      const edited = VibeReviseSplice.applyEdits(fx.source, [{
         start: target.span.start,
         end: target.span.end,
-        replacement: QuickEditEditor.serialise(value, target.span),
+        replacement: VibeReviseEditor.serialise(value, target.span),
       }]);
 
       ok(edited.indexOf('<p>Hello <strong>bold <em>and italic</em></strong> pla<br>net</p>') !== -1,

@@ -11,7 +11,7 @@ Developer registration is a one-off US$5.
 ## Name
 
 ```
-Quick Edit
+VibeRevise
 ```
 
 ## Short description
@@ -32,7 +32,7 @@ files that developers made, and that is where they will look for it.
 ## Detailed description
 
 ```
-Quick Edit lets you fix the text in an HTML document without opening a code editor — and without your file coming back reformatted.
+VibeRevise lets you fix the text in an HTML document without opening a code editor — and without your file coming back reformatted.
 
 Open the document in Chrome, click the icon, click any text on the page, and type. Press Save.
 
@@ -40,9 +40,9 @@ THE ONE RULE
 
 The saved file is the original file with only the words you changed replaced.
 
-Quick Edit never re-serialises the page. Every other tool in this space hands the document to a parser and writes the tree back out, which returns the browser's idea of your file: re-indented, attributes re-quoted, comments dropped, entities rewritten. Your one-word fix arrives as a diff touching every line.
+VibeRevise never re-serialises the page. Every other tool in this space hands the document to a parser and writes the tree back out, which returns the browser's idea of your file: re-indented, attributes re-quoted, comments dropped, entities rewritten. Your one-word fix arrives as a diff touching every line.
 
-Quick Edit keeps the original source as text, tracks the exact character range each editable run occupies in it, and splices your new words into those ranges. Everything else is copied through byte for byte. If a saved file differs anywhere other than the words you deliberately changed, that is a bug, not a trade-off.
+VibeRevise keeps the original source as text, tracks the exact character range each editable run occupies in it, and splices your new words into those ranges. Everything else is copied through byte for byte. If a saved file differs anywhere other than the words you deliberately changed, that is a bug, not a trade-off.
 
 WHAT IT IS FOR
 
@@ -60,7 +60,7 @@ WHERE IT WORKS
 
 Saving back to the server it came from is deliberately limited to your own network. The guarantee above depends on re-reading the exact document the browser parsed; that holds for a file server and does not hold for a page that renders anew on every request, and somebody else's site is not yours to overwrite in any case.
 
-A page built in the browser cannot be edited, because the HTML the server sent has almost none of its text in it. Quick Edit detects that and says so.
+A page built in the browser cannot be edited, because the HTML the server sent has almost none of its text in it. VibeRevise detects that and says so.
 
 COMMENTS THAT TRAVEL WITH THE FILE
 
@@ -84,7 +84,7 @@ You can change words, add another block like one that is already there, and atta
 
 PRIVACY
 
-Quick Edit sends your documents nowhere. It talks to the server your own document came from, to read it and, if you ask, save it back. Nothing else ever leaves your browser: no analytics, no accounts, no AI, no servers of ours.
+VibeRevise sends your documents nowhere. It talks to the server your own document came from, to read it and, if you ask, save it back. Nothing else ever leaves your browser: no analytics, no accounts, no AI, no servers of ours.
 
 It stores two things, in your browser only: the name you typed, and — if you add one — your API key and chosen model. Your key is never visible to the pages you edit.
 ```
@@ -96,7 +96,7 @@ functionality" gets rejected.)*
 
 **activeTab**
 ```
-Quick Edit reads and edits the document in the single tab whose toolbar icon the user clicked, and only until they navigate away. This is used to inject the editor and to read the document's text. activeTab was chosen over a standing host permission so that the extension has no access to any page unless the user explicitly invokes it on that page.
+VibeRevise reads and edits the document in the single tab whose toolbar icon the user clicked, and only until they navigate away. This is used to inject the editor and to read the document's text. activeTab was chosen over a standing host permission so that the extension has no access to any page unless the user explicitly invokes it on that page.
 ```
 
 **scripting**
@@ -129,7 +129,7 @@ Editing the visible text of an HTML document in the browser and saving it withou
 Declare it accurately — an inaccurate data
 disclosure is a common reason for rejection.
 
-Tick nothing. Quick Edit collects no user data: there is no analytics, no
+Tick nothing. VibeRevise collects no user data: there is no analytics, no
 tracking, no account and no network request of its own. The name the user
 types is stored locally and written only into documents they save themselves.
 

@@ -8,7 +8,7 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT="$DIR/quick-edit-$(node -e "
+OUT="$DIR/viberevise-$(node -e "
   const fs=require('fs');
   const raw=fs.readFileSync('$DIR/manifest.json','utf8').replace(/^\s*\/\/.*\$/gm,'');
   process.stdout.write(JSON.parse(raw).version);
@@ -17,7 +17,7 @@ OUT="$DIR/quick-edit-$(node -e "
 # The skew detector compares src/content.js's VERSION against what a previous
 # injection left behind, so it is useless if it does not track the manifest.
 # These drifted apart once already; refuse to build a zip that repeats it.
-MANIFEST_V="$(basename "$OUT" .zip | sed 's/^quick-edit-//')"
+MANIFEST_V="$(basename "$OUT" .zip | sed 's/^viberevise-//')"
 CONTENT_V="$(sed -n "s/.*var VERSION = '\([^']*\)'.*/\1/p" "$DIR/src/content.js")"
 if [ "$MANIFEST_V" != "$CONTENT_V" ]; then
   echo "version mismatch: manifest.json is $MANIFEST_V, src/content.js is $CONTENT_V" >&2

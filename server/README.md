@@ -1,23 +1,23 @@
 # Save in place, over the network
 
-Without this, Quick Edit's Save on an http(s) document is a download: the edited
+Without this, VibeRevise's Save on an http(s) document is a download: the edited
 file lands in your Downloads folder and you copy it back yourself. With it, Save
 writes the file back where it came from.
 
-`quick-edit-save.js` is a single dependency-free file. It answers two methods —
+`viberevise-save.js` is a single dependency-free file. It answers two methods —
 `OPTIONS`, which is how the extension discovers that save-in-place is available,
 and `PUT`, which is the save.
 
 ## Installing it
 
-Copy `quick-edit-save.js` next to whatever serves your documents, then mount it
+Copy `viberevise-save.js` next to whatever serves your documents, then mount it
 on the same path as your static mount:
 
 ```js
-const quickEditSave = require('./quick-edit-save');
+const vibeReviseSave = require('./viberevise-save');
 const ROOT = '/volume1/nas-raw';
 
-app.use('/nas-raw', quickEditSave({ root: ROOT }));   // PUT + OPTIONS
+app.use('/nas-raw', vibeReviseSave({ root: ROOT }));   // PUT + OPTIONS
 app.use('/nas-raw', express.static(ROOT));            // GET, as before
 ```
 
@@ -26,7 +26,7 @@ resolve to a different file than the GET. Order does not matter —
 `express.static` only answers GET and HEAD and passes everything else along —
 but reading it in this order makes the pairing obvious.
 
-Restart the server. Reload the document in Chrome, open Quick Edit, and the
+Restart the server. Reload the document in Chrome, open VibeRevise, and the
 button should now read **Save to server**. If it still says **Save**, the
 extension's `OPTIONS` probe did not see `PUT` in the `Allow` header; check that
 both mounts share a prefix and that nothing upstream is intercepting `OPTIONS`.
@@ -71,7 +71,7 @@ middleware.
 Two mechanisms, because saving a document in place is the one operation here
 that can destroy something.
 
-**Conditional writes.** Quick Edit sends the `ETag` it got when it read the
+**Conditional writes.** VibeRevise sends the `ETag` it got when it read the
 document, as `If-Match`. If the file changed in between — another tab, another
 person, an editor on the NAS — the write is refused with `412` and the extension
 tells you to reload rather than overwriting. The ETag format is byte-identical
@@ -79,7 +79,7 @@ to the one `express.static` generates, so a validator from a GET works here
 without translation.
 
 **Backups.** Every write first copies the previous version into
-`.quick-edit-backups/` beside the file, timestamped, keeping the most recent
+`.viberevise-backups/` beside the file, timestamped, keeping the most recent
 `keepBackups`. To undo a save, rename the newest backup back over the file.
 
 **Atomic writes.** The new document goes to a temp file in the same directory,

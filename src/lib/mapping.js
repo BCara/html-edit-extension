@@ -1,5 +1,5 @@
 /*
- * Quick Edit — offset map.
+ * VibeRevise — offset map.
  *
  * Pairs each live DOM text node with the exact span of the original source file
  * it came from. This is the foundation the whole extension rests on: if a node
@@ -64,7 +64,7 @@
 (function (root) {
   'use strict';
 
-  var Tokenizer = root.QuickEditTokenizer;
+  var Tokenizer = root.VibeReviseTokenizer;
 
   // Text inside these never becomes editable: it is code, metadata, or inert
   // content, not prose the user is looking at.
@@ -299,12 +299,12 @@
       if (p.nodeType === 1) {
         var tag = (p.tagName || '').toUpperCase();
         if (BLOCKED.indexOf(tag) !== -1) return true;
-        if (p.hasAttribute && p.hasAttribute('data-quick-edit-ui')) return true;
+        if (p.hasAttribute && p.hasAttribute('data-viberevise-ui')) return true;
         // A comment rendered into the document is the editor's own note, not
         // the author's prose. It is edited from the margin card like every
         // other comment, so letting it be typed into directly as well would
         // give one piece of text two owners.
-        if (p.hasAttribute && p.hasAttribute('data-qe-comment')) return true;
+        if (p.hasAttribute && p.hasAttribute('data-vr-comment')) return true;
       }
     }
     return false;
@@ -488,7 +488,7 @@
     };
   }
 
-  root.QuickEditMap = {
+  root.VibeReviseMap = {
     build: build,
     mapElements: mapElements,
     mapComments: mapComments,

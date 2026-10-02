@@ -57,7 +57,7 @@
 
   function finish() {
     var verdict = tally.fail === 0 ? 'ALL PASS' : 'FAILURES';
-    var text = 'QE-RESULT: ' + verdict + ' — ' + tally.pass + ' passed, ' + tally.fail + ' failed';
+    var text = 'VR-RESULT: ' + verdict + ' — ' + tally.pass + ' passed, ' + tally.fail + ' failed';
     if (summary) summary.textContent = text;
     document.title = text;
     return text;

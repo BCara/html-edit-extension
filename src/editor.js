@@ -1,5 +1,5 @@
 /*
- * Quick Edit — edit mode.
+ * VibeRevise — edit mode.
  *
  * Turns the mapped text regions into editable islands, keeps what the user can
  * do inside them narrow enough that the markup cannot move, tracks history, and
@@ -31,19 +31,19 @@
 (function (root) {
   'use strict';
 
-  var Islands = root.QuickEditIslands;
-  var Splice = root.QuickEditSplice;
-  var Blocks = root.QuickEditBlocks;
-  var Comments = root.QuickEditComments;
-  var Structures = root.QuickEditStructures;
+  var Islands = root.VibeReviseIslands;
+  var Splice = root.VibeReviseSplice;
+  var Blocks = root.VibeReviseBlocks;
+  var Comments = root.VibeReviseComments;
+  var Structures = root.VibeReviseStructures;
   // Optional: present when the host loaded it. Only its presets and its word
   // diff are used in the page; the request itself is made by the host, which is
   // where the user's API key lives.
-  function AI() { return root.QuickEditAI || null; }
+  function AI() { return root.VibeReviseAI || null; }
 
-  var UI_ATTR = 'data-quick-edit-ui';
-  var MODE_ATTR = 'data-qe-mode';
-  var CHANGED_ATTR = 'data-qe-changed';
+  var UI_ATTR = 'data-viberevise-ui';
+  var MODE_ATTR = 'data-vr-mode';
+  var CHANGED_ATTR = 'data-vr-changed';
   var COALESCE_MS = 700;     // typing runs merge into one undo step
   var HISTORY_LIMIT = 500;
 
@@ -153,36 +153,36 @@
    * to initial — and the affordances are then added back deliberately.
    */
   var ISLAND_CSS = [
-    '[data-qe-island] { all: unset !important; display: inline !important; }',
-    ':root[data-qe-mode] [data-qe-island] {',
+    '[data-vr-island] { all: unset !important; display: inline !important; }',
+    ':root[data-vr-mode] [data-vr-island] {',
     '  cursor: text !important;',
     '  border-radius: 2px !important;',
     '}',
-    ':root[data-qe-mode] [data-qe-island]:hover {',
+    ':root[data-vr-mode] [data-vr-island]:hover {',
     '  background: rgba(91, 82, 240, .09) !important;',
     '  box-shadow: 0 0 0 1px rgba(91, 82, 240, .35) !important;',
     '}',
-    ':root[data-qe-mode] [data-qe-island]:focus {',
+    ':root[data-vr-mode] [data-vr-island]:focus {',
     '  outline: none !important;',
     '  background: rgba(91, 82, 240, .12) !important;',
     '  box-shadow: 0 0 0 2px rgba(91, 82, 240, .75) !important;',
     '}',
-    ':root[data-qe-mode] [data-qe-island][data-qe-changed] {',
+    ':root[data-vr-mode] [data-vr-island][data-vr-changed] {',
     '  background: rgba(217, 160, 30, .16) !important;',
     '}',
     // A commented section is shaded and barred, the way a word processor marks
     // one, so it is obvious which note belongs to which passage.
-    ':root[data-qe-mode] [data-qe-commented] {',
+    ':root[data-vr-mode] [data-vr-commented] {',
     '  background: rgba(217, 160, 30, .10) !important;',
     '  box-shadow: -4px 0 0 rgba(217, 160, 30, .65) !important;',
     '}',
-    ':root[data-qe-mode] [data-qe-commented][data-qe-comment-active] {',
+    ':root[data-vr-mode] [data-vr-commented][data-vr-comment-active] {',
     '  background: rgba(217, 160, 30, .2) !important;',
     '  box-shadow: -4px 0 0 rgba(217, 160, 30, 1) !important;',
     '}',
     // An island emptied of all its text would otherwise be impossible to click
     // back into.
-    ':root[data-qe-mode] [data-qe-island]:empty {',
+    ':root[data-vr-mode] [data-vr-island]:empty {',
     '  display: inline-block !important;',
     '  min-width: .7em !important;',
     '  min-height: 1em !important;',
@@ -436,7 +436,7 @@
 
     var anchor = anchorForBlock(block);
     if (!anchor) {
-      flash('Quick Edit cannot tell where this block ends in the file');
+      flash('VibeRevise cannot tell where this block ends in the file');
       return null;
     }
 
@@ -528,13 +528,13 @@
    */
   function insertStructure(id, where) {
     var block = where || currentBlock();
-    if (!block) { flash('Quick Edit cannot tell where to put that in the file'); return null; }
+    if (!block) { flash('VibeRevise cannot tell where to put that in the file'); return null; }
 
     var anchor = anchorForBlock(block);
-    if (!anchor) { flash('Quick Edit cannot tell where this block ends in the file'); return null; }
+    if (!anchor) { flash('VibeRevise cannot tell where this block ends in the file'); return null; }
 
     var built = Structures.build(document, id, block);
-    if (!built) { flash('Quick Edit does not know how to add that'); return null; }
+    if (!built) { flash('VibeRevise does not know how to add that'); return null; }
 
     block.parentNode.insertBefore(built.element, block.nextSibling);
 
@@ -762,13 +762,13 @@
       e.preventDefault();
       if (type.lastIndexOf('format', 0) === 0) {
         // Bold, italic, colours, indentation, alignment: all of it would mean
-        // new markup or new attributes, which is exactly what Quick Edit does
+        // new markup or new attributes, which is exactly what VibeRevise does
         // not do.
-        flash('Quick Edit changes words, not formatting');
+        flash('VibeRevise changes words, not formatting');
       } else if (type === 'insertFromDrop') {
         flash('Drag and drop is not supported — copy and paste instead');
       } else {
-        flash('That kind of edit is not supported in Quick Edit');
+        flash('That kind of edit is not supported in VibeRevise');
       }
       return;
     }
@@ -953,7 +953,7 @@
    * for anything dispatchEvent produced, and that is the only thing telling
    * the two apart.
    *
-   * It did not matter while Quick Edit only opened documents the user wrote.
+   * It did not matter while VibeRevise only opened documents the user wrote.
    * It matters now that it opens pages they did not: without this, a page can
    * forge Ctrl+S and raise a Save dialog nobody asked for, forge Ctrl+Z to
    * undo work, or forge beforeinput to put its own words into the document and
@@ -1386,8 +1386,8 @@
 
   // --- comments --------------------------------------------------------------
 
-  var COMMENTED_ATTR = 'data-qe-commented';
-  var ACTIVE_ATTR = 'data-qe-comment-active';
+  var COMMENTED_ATTR = 'data-vr-commented';
+  var ACTIVE_ATTR = 'data-vr-comment-active';
   var RAIL_WIDTH = 296;
 
   var RAIL_CSS = [
@@ -1614,7 +1614,7 @@
     flushCommentEdit();
     var anchor = Comments.anchorFor(state.map, state.source, block);
     if (!anchor) {
-      flash('Quick Edit cannot tell where this section starts in the file');
+      flash('VibeRevise cannot tell where this section starts in the file');
       return null;
     }
     if (!authorName() && !state.nudgedName) {
@@ -1962,7 +1962,7 @@
                     'title="What these do" aria-label="What these do">i</button>' +
           '</div>' +
           '<div class="p-row">' +
-            '<input id="qe-author" class="p-input" maxlength="60" autocomplete="name" ' +
+            '<input id="vr-author" class="p-input" maxlength="60" autocomplete="name" ' +
                    'aria-label="Your name" placeholder="Your name">' +
             '<button class="p-save">Save</button>' +
           '</div>' +
@@ -1974,7 +1974,7 @@
           '</label>' +
           '<div class="p-hint" data-info hidden>Off, a comment is hidden in the file: ' +
             'it travels with the document but no browser shows it. On, it is saved as ' +
-            'a visible note anyone can read without Quick Edit. The switch goes both ' +
+            'a visible note anyone can read without VibeRevise. The switch goes both ' +
             'ways, and rewrites every comment next time you save.</div>' +
           '<div class="p-sep"></div>' +
           '<button class="p-changes">Show changes</button>' +
@@ -2602,16 +2602,16 @@
   function requestDownload(text) {
     var blobUrl = URL.createObjectURL(new Blob([text], { type: 'text/html;charset=utf-8' }));
 
-    return send({ type: 'quickEdit:download', url: blobUrl, filename: state.filename })
+    return send({ type: 'vibeRevise:download', url: blobUrl, filename: state.filename })
       .then(function (res) {
         setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 60000);
-        if (res && res.ok) { console.log('[Quick Edit] saved via blob URL'); return res; }
-        console.warn('[Quick Edit] blob URL download failed, trying a data URL:', res && res.message);
-        return send({ type: 'quickEdit:download', url: toDataUrl(text), filename: state.filename });
+        if (res && res.ok) { console.log('[VibeRevise] saved via blob URL'); return res; }
+        console.warn('[VibeRevise] blob URL download failed, trying a data URL:', res && res.message);
+        return send({ type: 'vibeRevise:download', url: toDataUrl(text), filename: state.filename });
       })
       .then(function (res) {
-        if (res && res.ok) { console.log('[Quick Edit] saved via data URL'); return res; }
-        console.warn('[Quick Edit] downloads API unavailable, falling back to a download link:',
+        if (res && res.ok) { console.log('[VibeRevise] saved via data URL'); return res; }
+        console.warn('[VibeRevise] downloads API unavailable, falling back to a download link:',
                      res && res.message);
         var a = doc().createElement('a');
         a.setAttribute(UI_ATTR, '');
@@ -2826,7 +2826,7 @@
       // `all: unset` to remain invisible.
     }
 
-    send({ type: 'quickEdit:state', active: state.active, unsaved: unsavedCount() });
+    send({ type: 'vibeRevise:state', active: state.active, unsaved: unsavedCount() });
     return state.active;
   }
 
@@ -2888,7 +2888,7 @@
     };
   }
 
-  root.QuickEditEditor = {
+  root.VibeReviseEditor = {
     init: init,
     // Exposed for the test suite: `preview` is the file that would be written,
     // and `serialise` decides what text lands in it. Both are worth testing

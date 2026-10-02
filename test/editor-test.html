@@ -1,14 +1,14 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Quick Edit — editor tests</title>
+<title>VibeRevise — editor tests</title>
 <!--
   This page IS the document under test. It fetches its own source, builds the
   offset map over itself and runs real edit mode on it, which is exactly what
-  the extension does to a local file. Anything marked data-quick-edit-ui — the
+  the extension does to a local file. Anything marked data-viberevise-ui — the
   results output below — is excluded from the map, so the test harness never
   becomes editable text.
 -->
-<style data-quick-edit-ui>
+<style data-viberevise-ui>
   body { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem; }
   h1 { font: 600 15px system-ui, sans-serif; margin: 0 0 1rem; }
   #doc { max-width: 40rem; font-family: Georgia, serif; }
@@ -42,8 +42,8 @@
   <p><a href="does-not-exist.html" id="link">A link that must not navigate</a></p>
 </section>
 
-<div data-quick-edit-ui>
-  <h1>Quick Edit — editor tests</h1>
+<div data-viberevise-ui>
+  <h1>VibeRevise — editor tests</h1>
   <div id="out">Running…</div>
   <div id="summary"></div>
 </div>

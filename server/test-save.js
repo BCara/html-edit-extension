@@ -1,5 +1,5 @@
 /*
- * Quick Edit — save-in-place route tests.
+ * VibeRevise — save-in-place route tests.
  *
  * Runs the handler behind a plain http server against a throwaway tree, so it
  * needs no framework and no network. The last section is the real thing: the
@@ -15,7 +15,7 @@ const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const path = require('path');
-const quickEditSave = require('./quick-edit-save.js');
+const vibeReviseSave = require('./viberevise-save.js');
 const { tokenize, replaceSpans, applyEdits } = require('../packages/html-splice/index.js');
 
 let pass = 0, fail = 0;
@@ -45,7 +45,7 @@ function request(port, method, urlPath, { headers = {}, body = null } = {}) {
 }
 
 (async () => {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'qe-save-'));
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'vr-save-'));
   await fsp.mkdir(path.join(root, 'sub'), { recursive: true });
   const doc = path.join(root, 'sub', 'doc.html');
   const ORIGINAL = '<!doctype html>\n<html><body>\n<h1>Original heading</h1>\n<p>Body text.</p>\n</body></html>\n';
@@ -53,10 +53,10 @@ function request(port, method, urlPath, { headers = {}, body = null } = {}) {
   await fsp.writeFile(path.join(root, 'notes.txt'), 'not html', 'utf8');
 
   // Somewhere outside the root, to be reached by traversal if the guard fails.
-  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'qe-outside-'));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), 'vr-outside-'));
   await fsp.writeFile(path.join(outside, 'secret.html'), '<p>should never be written</p>', 'utf8');
 
-  const handler = quickEditSave({ root, keepBackups: 3, logger: null });
+  const handler = vibeReviseSave({ root, keepBackups: 3, logger: null });
   const server = http.createServer((req, res) => handler(req, res, () => {
     // Stand in for express.static: GET returns the file and an ETag in the
     // same format, which is what makes the conditional PUT round trip.
@@ -66,7 +66,7 @@ function request(port, method, urlPath, { headers = {}, body = null } = {}) {
         const stat = fs.statSync(file);
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',
-          ETag: quickEditSave.statTag(stat),
+          ETag: vibeReviseSave.statTag(stat),
           'Last-Modified': stat.mtime.toUTCString(),
         });
         res.end(fs.readFileSync(file));
@@ -101,9 +101,9 @@ function request(port, method, urlPath, { headers = {}, body = null } = {}) {
     ok(res.headers.etag && res.headers.etag !== etag, 'a fresh ETag comes back for the next save');
     ok(res.json && res.json.backup, 'a backup was reported');
 
-    const backups = await fsp.readdir(path.join(root, 'sub', '.quick-edit-backups'));
+    const backups = await fsp.readdir(path.join(root, 'sub', '.viberevise-backups'));
     eq(backups.length, 1, 'and exists on disk');
-    eq(await fsp.readFile(path.join(root, 'sub', '.quick-edit-backups', backups[0]), 'utf8'),
+    eq(await fsp.readFile(path.join(root, 'sub', '.viberevise-backups', backups[0]), 'utf8'),
        ORIGINAL, 'holding the version that was replaced');
   }
 
@@ -154,7 +154,7 @@ function request(port, method, urlPath, { headers = {}, body = null } = {}) {
       // mtime has second granularity on some filesystems; keep stamps distinct.
       await new Promise((r) => setTimeout(r, 12));
     }
-    const backups = await fsp.readdir(path.join(root, 'sub', '.quick-edit-backups'));
+    const backups = await fsp.readdir(path.join(root, 'sub', '.viberevise-backups'));
     eq(backups.length, 3, 'only the most recent keepBackups are retained');
   }
 

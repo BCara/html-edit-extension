@@ -1,5 +1,5 @@
 /*
- * Quick Edit — adding a structure.
+ * VibeRevise — adding a structure.
  *
  * blocks.js answers "another one of THESE", where the answer is one element
  * holding one run of text. This answers "a table", where the answer is a small
@@ -19,7 +19,7 @@
  * Where the document has no donor, a plain skeleton is built with no class at
  * all. It will look like whatever the document does to a bare <table>, which
  * may be nothing. That is the honest outcome and it is better than inventing
- * styles: guessing at CSS would make Quick Edit responsible for appearance,
+ * styles: guessing at CSS would make VibeRevise responsible for appearance,
  * which is the one thing it has always refused.
  *
  * NOTHING IS COPIED FROM THE DONOR'S CONTENT
@@ -62,7 +62,7 @@
   }
 
   function islandAttr() {
-    return root.QuickEditIslands.ATTR;
+    return root.VibeReviseIslands.ATTR;
   }
 
   /*
@@ -271,7 +271,7 @@
     return out;
   }
 
-  root.QuickEditStructures = {
+  root.VibeReviseStructures = {
     KINDS: KINDS,
     kindById: kindById,
     findDonor: findDonor,
@@ -280,5 +280,5 @@
     markup: markup,
   };
 
-  if (typeof module !== 'undefined' && module.exports) module.exports = root.QuickEditStructures;
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.VibeReviseStructures;
 })(typeof self !== 'undefined' ? self : globalThis);

@@ -1,5 +1,5 @@
 /*
- * Quick Edit — comments.
+ * VibeRevise — comments.
  *
  * A comment is stored as an ordinary HTML comment sitting just before the block
  * it is attached to:
@@ -7,7 +7,7 @@
  *     <!-- comment: needs a figure for Q3 -->
  *     <p>Revenue grew by 12% over the quarter.</p>
  *
- * Nothing about that is Quick Edit's private format. A browser shows none of
+ * Nothing about that is VibeRevise's private format. A browser shows none of
  * it, a text editor shows all of it, and anyone — or anything — you send the
  * file to can read it without knowing this extension exists. That is the whole
  * reason for choosing comments over a store inside the browser: notes that
@@ -23,7 +23,7 @@
  *
  *     <!-- comment [Cara · 2026-10-01]: needs a figure for Q3 -->
  *
- * The name is whatever the writer typed into Quick Edit — self-declared, not
+ * The name is whatever the writer typed into VibeRevise — self-declared, not
  * verified — so it says who claims to have written a note, which is what a
  * team that trusts each other needs, and no more. The plain form without
  * brackets is still read, so notes from before authorship existed keep working.
@@ -35,13 +35,13 @@
  * for someone who wants to read their own notes without this extension. So a
  * comment has a second form, carrying the same three fields:
  *
- *     <div data-qe-comment="Cara · 2026-10-01" style="…">Cara · 2026-10-01: needs a figure for Q3</div>
+ *     <div data-vr-comment="Cara · 2026-10-01" style="…">Cara · 2026-10-01: needs a figure for Q3</div>
  *     <p>Revenue grew by 12% over the quarter.</p>
  *
  * The attribute is the record and the text is the display, written from each
  * other so they cannot disagree. Every style is inline, so the note looks the
  * same in a file sent to someone who has no stylesheet, no network and no idea
- * what Quick Edit is.
+ * what VibeRevise is.
  *
  * Both forms are read, always. Which one is WRITTEN is a single switch in the
  * editor, so turning it on rewrites every note in the file into the visible
@@ -52,7 +52,7 @@
 (function (root) {
   'use strict';
 
-  var Blocks = root.QuickEditBlocks;
+  var Blocks = root.VibeReviseBlocks;
 
   // Continuation lines are indented to sit under the text of the first line.
   var CONTINUATION = '     ';
@@ -138,7 +138,7 @@
 
   // --- the visible form -------------------------------------------------------
 
-  var RENDERED_ATTR = 'data-qe-comment';
+  var RENDERED_ATTR = 'data-vr-comment';
 
   /*
    * Inline, because this has to survive being emailed to someone who will open
@@ -267,7 +267,7 @@
     return { start: token.start, end: token.end };
   }
 
-  root.QuickEditComments = {
+  root.VibeReviseComments = {
     parse: parse,
     RENDERED_ATTR: RENDERED_ATTR,
     renderedMarkup: renderedMarkup,

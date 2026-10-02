@@ -40,7 +40,7 @@ A quote follows, usually within a few days.
 
 ## Provenance
 
-The library was extracted from [Quick Edit](../../README.md), a browser
+The library was extracted from [VibeRevise](../../README.md), a browser
 extension for editing HTML documents in place, where the byte-preservation
 guarantee is the entire product. It is not a weekend experiment: the offset
 arithmetic is covered by a test suite that checks byte-identical round trips

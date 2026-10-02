@@ -1,5 +1,5 @@
 /*
- * Quick Edit — write-back.
+ * VibeRevise — write-back.
  *
  * The saved file is the ORIGINAL source string with a handful of character
  * ranges replaced. It is never produced by serialising the DOM. That is the
@@ -77,10 +77,10 @@
     for (var i = 0; i < sorted.length; i++) {
       var e = sorted[i];
       if (!(e.start >= 0 && e.end >= e.start && e.end <= source.length)) {
-        throw new Error('Quick Edit: edit range out of bounds (' + e.start + ',' + e.end + ')');
+        throw new Error('VibeRevise: edit range out of bounds (' + e.start + ',' + e.end + ')');
       }
       if (i > 0 && e.start < sorted[i - 1].end) {
-        throw new Error('Quick Edit: overlapping edits at offset ' + e.start);
+        throw new Error('VibeRevise: overlapping edits at offset ' + e.start);
       }
     }
 
@@ -95,7 +95,7 @@
     return parts.join('');
   }
 
-  root.QuickEditSplice = {
+  root.VibeReviseSplice = {
     escapeText: escapeText,
     replacementFor: replacementFor,
     applyEdits: applyEdits
@@ -104,5 +104,5 @@
   // CommonJS, for use outside a browser. The browser global above is what the
   // Chrome extension's injected scripts bind to; `module` is undefined there,
   // so this is skipped and nothing changes for them.
-  if (typeof module !== 'undefined' && module.exports) module.exports = root.QuickEditSplice;
+  if (typeof module !== 'undefined' && module.exports) module.exports = root.VibeReviseSplice;
 })(typeof self !== 'undefined' ? self : globalThis);

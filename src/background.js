@@ -1,5 +1,5 @@
 /*
- * Quick Edit — service worker.
+ * VibeRevise — service worker.
  *
  * Deliberately thin. It exists to do the four things a content script cannot:
  *   - inject the editor into the active tab (chrome.scripting)
@@ -20,10 +20,10 @@
  * the user asked for — it is never stored, and never sent anywhere else.
  */
 
-// The classifier decides which documents Quick Edit will touch; the popup gets
+// The classifier decides which documents VibeRevise will touch; the popup gets
 // its verdict relayed rather than re-deriving it.
 importScripts('/src/lib/origins.js');
-const Origins = self.QuickEditOrigins;
+const Origins = self.VibeReviseOrigins;
 
 // Order matters: each library defines globals the next file uses.
 const INJECT_FILES = [
@@ -48,7 +48,7 @@ async function ensureInjected(tabId) {
   // Ask first: re-injecting would wipe the in-page undo history and any
   // unsaved edits the islands are holding.
   try {
-    const pong = await chrome.tabs.sendMessage(tabId, { type: 'quickEdit:ping' });
+    const pong = await chrome.tabs.sendMessage(tabId, { type: 'vibeRevise:ping' });
     if (pong && pong.ready) return;
   } catch (e) {
     // No receiver yet — expected on the first click.
@@ -57,7 +57,7 @@ async function ensureInjected(tabId) {
 }
 
 /*
- * The active tab, if Quick Edit is willing to edit it.
+ * The active tab, if VibeRevise is willing to edit it.
  *
  * Note which check applies to which kind. "Allow access to file URLs" is a
  * file:// concern only: an http(s) document is read by the content script with
@@ -138,9 +138,9 @@ async function download(url, filename) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg.type !== 'string') return;
 
-  if (msg.type === 'quickEdit:inspect' || msg.type === 'quickEdit:toggle' ||
-      msg.type === 'quickEdit:save') {
-    const forward = msg.type === 'quickEdit:inspect' ? 'quickEdit:scan' : msg.type;
+  if (msg.type === 'vibeRevise:inspect' || msg.type === 'vibeRevise:toggle' ||
+      msg.type === 'vibeRevise:save') {
+    const forward = msg.type === 'vibeRevise:inspect' ? 'vibeRevise:scan' : msg.type;
     (async () => {
       try {
         const res = await relay(forward, { active: msg.active });
@@ -157,20 +157,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // Sent by the content script whenever edit mode is turned on or off.
-  if (msg.type === 'quickEdit:state') {
+  if (msg.type === 'vibeRevise:state') {
     setBadge(sender.tab && sender.tab.id, msg.active, msg.unsaved);
     sendResponse({ ok: true });
     return;
   }
 
-  if (msg.type === 'quickEdit:readFile') {
+  if (msg.type === 'vibeRevise:readFile') {
     readFile(msg.url).then(sendResponse);
     return true;
   }
 
   // The popup asks before it does anything, so that a served document never
   // gets shown the file:// permission dance it has no use for.
-  if (msg.type === 'quickEdit:classifyActive') {
+  if (msg.type === 'vibeRevise:classifyActive') {
     (async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const verdict = classify(tab && tab.url);
@@ -179,13 +179,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  if (msg.type === 'quickEdit:hasFilePermission') {
+  if (msg.type === 'vibeRevise:hasFilePermission') {
     chrome.permissions.contains({ origins: ['file:///*'] })
       .then(function (granted) { sendResponse({ ok: true, granted }); });
     return true;
   }
 
-  if (msg.type === 'quickEdit:download') {
+  if (msg.type === 'vibeRevise:download') {
     (async () => {
       try {
         const id = await download(msg.url, msg.filename);
@@ -199,7 +199,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  if (msg.type === 'quickEdit:openExtensionsPage') {
+  if (msg.type === 'vibeRevise:openExtensionsPage') {
     chrome.tabs.create({ url: 'chrome://extensions/?id=' + chrome.runtime.id });
     return;
   }

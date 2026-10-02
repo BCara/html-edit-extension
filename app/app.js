@@ -1,5 +1,5 @@
 /*
- * Quick Edit — the web app.
+ * VibeRevise — the web app.
  *
  * The extension edits the page it was injected into. This edits a file you
  * choose, rendered into an iframe, and the editor is told to work on that
@@ -56,14 +56,14 @@ var current = {
 
 var CAN_HANDLE = typeof window.showOpenFilePicker === 'function';
 
-var RECENTS_KEY = 'quick-edit:recent-network-documents';
+var RECENTS_KEY = 'viberevise:recent-network-documents';
 
 // --- your name ----------------------------------------------------------------
 
 // Stored in this browser only.
 var STORE = {
-  author: 'quick-edit:author',
-  commentsVisible: 'quick-edit:comments-visible',
+  author: 'viberevise:author',
+  commentsVisible: 'viberevise:comments-visible',
 };
 
 function readStore(key) {
@@ -168,13 +168,13 @@ function openFile() {
  */
 function encodingProblem(source) {
   if (source.indexOf('�') !== -1) {
-    return 'This file is not valid UTF-8. Quick Edit would corrupt it, so it will not open it.';
+    return 'This file is not valid UTF-8. VibeRevise would corrupt it, so it will not open it.';
   }
   var meta = /<meta[^>]+charset\s*=\s*["']?\s*([\w-]+)/i.exec(source.slice(0, 4096));
   if (meta) {
     var cs = meta[1].toLowerCase();
     if (cs !== 'utf-8' && cs !== 'utf8') {
-      return 'This file declares charset "' + meta[1] + '". Quick Edit only handles UTF-8.';
+      return 'This file declares charset "' + meta[1] + '". VibeRevise only handles UTF-8.';
     }
   }
   return null;
@@ -217,13 +217,13 @@ async function load(source, name, handle) {
   current.handle = handle;
 
   var d = await render(source);
-  var map = window.QuickEditMap.build(source, d);
+  var map = window.VibeReviseMap.build(source, d);
 
   if (!map.stats.editable) {
-    toast('Quick Edit could not find any editable text in that file.', 'warn');
+    toast('VibeRevise could not find any editable text in that file.', 'warn');
   }
 
-  window.QuickEditEditor.init({
+  window.VibeReviseEditor.init({
     /*
      * The editor ignores synthetic events in the extension, because a page it
      * did not write could forge them. Here it may trust them, and not as a
@@ -240,7 +240,7 @@ async function load(source, name, handle) {
     saveFile: saveFile,
     settings: SETTINGS,
   });
-  window.QuickEditEditor.setActive(true);
+  window.VibeReviseEditor.setActive(true);
 
   els.welcome.hidden = true;
   els.filename.hidden = false;
@@ -292,7 +292,7 @@ function saveFile(text) {
     return writeThroughHandle(text).catch(function (err) {
       // Permission can lapse, or the file can have gone. Never lose the edits
       // over it — fall back rather than fail.
-      console.warn('[Quick Edit] writing through the handle failed:', err);
+      console.warn('[VibeRevise] writing through the handle failed:', err);
       return downloadFile(text);
     });
   }
@@ -328,8 +328,8 @@ function networkProblem(value) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') {
     return 'Only http:// and https:// addresses.';
   }
-  if (!window.QuickEditOrigins.isPrivateHost(u.hostname)) {
-    return u.hostname + ' is not on your own network, so Quick Edit will not ' +
+  if (!window.VibeReviseOrigins.isPrivateHost(u.hostname)) {
+    return u.hostname + ' is not on your own network, so VibeRevise will not ' +
            'open it. Addresses like 192.168.x.x, 10.x.x.x, localhost or a ' +
            '.local name are what it expects.';
   }
@@ -438,12 +438,12 @@ function openNetwork(url) {
 
 function watchUnsaved() {
   setInterval(function () {
-    var s = window.QuickEditEditor.status();
+    var s = window.VibeReviseEditor.status();
     els.save.disabled = s.unsaved === 0;
   }, 300);
 
   window.addEventListener('beforeunload', function (e) {
-    if (window.QuickEditEditor.status().unsaved > 0) {
+    if (window.VibeReviseEditor.status().unsaved > 0) {
       e.preventDefault();
       e.returnValue = '';
     }
@@ -569,7 +569,7 @@ els.openMain.addEventListener('click', openFile);
 
   renderRecents();
 })();
-els.save.addEventListener('click', function () { window.QuickEditEditor.save(); });
+els.save.addEventListener('click', function () { window.VibeReviseEditor.save(); });
 
 // Drop a file anywhere. Only useful with a pointer, so it is not advertised on
 // touch, but it costs nothing to leave working.
@@ -593,12 +593,12 @@ els.save.addEventListener('click', function () { window.QuickEditEditor.save(); 
 function registerWorker() {
   if (!('serviceWorker' in navigator)) return;
   if (!window.isSecureContext) {
-    console.info('[Quick Edit] not a secure context, so no offline support or ' +
+    console.info('[VibeRevise] not a secure context, so no offline support or ' +
                  'install here. Serve over https and it appears.');
     return;
   }
   navigator.serviceWorker.register('sw.js').catch(function (err) {
-    console.warn('[Quick Edit] the service worker did not register:', err);
+    console.warn('[VibeRevise] the service worker did not register:', err);
   });
 }
 
@@ -644,7 +644,7 @@ function settingsStatus(text, tone) {
     var name = document.getElementById('set-author').value.replace(/\s+/g, ' ').trim().slice(0, 60);
     writeStore(STORE.author, name);
     // An open document picks the name up straight away.
-    if (window.QuickEditEditor && current.source) window.QuickEditEditor.setAuthor(name);
+    if (window.VibeReviseEditor && current.source) window.VibeReviseEditor.setAuthor(name);
     toast('Saved.');
   });
 })();
@@ -657,7 +657,7 @@ openFromQuery();
 // Exposed for the test suite: driving a real file picker from a headless
 // browser is not possible, so the suite calls load() directly with the bytes a
 // picker would have handed over.
-window.__quickEditApp = {
+window.__vibeReviseApp = {
   load: load,
   saveFile: saveFile,
   settings: SETTINGS,
