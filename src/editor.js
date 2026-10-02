@@ -36,10 +36,6 @@
   var Blocks = root.VibeReviseBlocks;
   var Comments = root.VibeReviseComments;
   var Structures = root.VibeReviseStructures;
-  // Optional: present when the host loaded it. Only its presets and its word
-  // diff are used in the page; the request itself is made by the host, which is
-  // where the user's API key lives.
-  function AI() { return root.VibeReviseAI || null; }
 
   var UI_ATTR = 'data-viberevise-ui';
   var MODE_ATTR = 'data-vr-mode';
@@ -2269,13 +2265,61 @@
   // For display only: a <br> in an island's value reads as a return arrow.
   function visible(value) { return String(value || '').split(Islands.BR).join(' ↵ '); }
 
-  // Before/after as marked-up words, built from DOM nodes so that neither the
-  // document's text nor Claude's can inject anything.
+  /*
+   * Which words changed, as [{ op: 'same'|'del'|'add', text }].
+   *
+   * Longest common subsequence over words, the ordinary way. This lived in the
+   * AI module until that was removed, which was always the wrong home for it:
+   * there is nothing AI about asking which words differ, and the list of
+   * changes needs the answer whether anything else is installed or not.
+   *
+   * Splitting on (\s+) keeps the whitespace as its own token, so the pieces
+   * rejoin into exactly the text that went in.
+   *
+   * The table is n*m, so a pathological pair of long runs would allocate more
+   * than the answer is worth. Past that bound it says "all of this became all
+   * of that" rather than spending a second on a prettier answer nobody is
+   * waiting for.
+   */
+  function diffWords(a, b) {
+    var x = String(a).split(/(\s+)/).filter(function (t) { return t !== ''; });
+    var y = String(b).split(/(\s+)/).filter(function (t) { return t !== ''; });
+    if (x.length * y.length > 4000000) {
+      return [{ op: 'del', text: String(a) }, { op: 'add', text: String(b) }];
+    }
+
+    var n = x.length, m = y.length;
+    var table = [];
+    for (var i = 0; i <= n; i++) table.push(new Uint32Array(m + 1));
+    for (i = n - 1; i >= 0; i--) {
+      for (var j = m - 1; j >= 0; j--) {
+        table[i][j] = x[i] === y[j] ? table[i + 1][j + 1] + 1
+          : Math.max(table[i + 1][j], table[i][j + 1]);
+      }
+    }
+
+    var out = [];
+    function push(op, text) {
+      var last = out[out.length - 1];
+      if (last && last.op === op) last.text += text;
+      else out.push({ op: op, text: text });
+    }
+
+    i = 0; j = 0;
+    while (i < n && j < m) {
+      if (x[i] === y[j]) { push('same', x[i]); i++; j++; }
+      else if (table[i + 1][j] >= table[i][j + 1]) { push('del', x[i]); i++; }
+      else { push('add', y[j]); j++; }
+    }
+    while (i < n) push('del', x[i++]);
+    while (j < m) push('add', y[j++]);
+    return out;
+  }
+
+  // Before/after as marked-up words, built from DOM nodes so the document's
+  // own text cannot inject anything.
   function diffInto(box, before, after) {
-    var ai = AI();
-    var parts = ai ? ai.diffWords(visible(before), visible(after))
-      : [{ op: 'del', text: visible(before) }, { op: 'add', text: visible(after) }];
-    parts.forEach(function (part) {
+    diffWords(visible(before), visible(after)).forEach(function (part) {
       var node = doc().createElement(part.op === 'same' ? 'span' : part.op === 'del' ? 'del' : 'ins');
       node.textContent = part.text;
       box.appendChild(node);
@@ -2906,6 +2950,8 @@
     removeComment: removeComment,
     commentRegions: liveComments,
     setActive: setActive,
+    // Exposed for the suite: the list of changes is built from this.
+    diffWords: diffWords,
     setCommentsVisible: setCommentsVisible,
     commentsVisible: function () { return state.commentsVisible; },
     isActive: function () { return state.active; },

@@ -1142,6 +1142,37 @@ async function run() {
     eq(VibeReviseEditor.preview(), fileBefore, 'and the file is exactly as it was');
   }
 
+  heading('the list of changes shows which words changed');
+  {
+    /*
+     * This regressed silently when AI rewrites were removed: diffWords lived
+     * in that module, so the changes list quietly fell back to one whole
+     * "before" and one whole "after". Nothing failed, the README still
+     * promised word by word, and nobody noticed until the rename walked past
+     * a helper that could only ever return null.
+     */
+    const d = VibeReviseEditor.diffWords(
+      'Revenue grew by 12% over the quarter.',
+      'Revenue rose 12% this quarter.');
+
+    const without = (op) => d.filter((p) => p.op !== op).map((p) => p.text).join('');
+    eq(without('add'), 'Revenue grew by 12% over the quarter.',
+       'dropping the additions gives back the original, whitespace and all');
+    eq(without('del'), 'Revenue rose 12% this quarter.',
+       'and dropping the removals gives the new wording');
+    ok(d.some((p) => p.op === 'same' && p.text.indexOf('12%') !== -1),
+       'the words that did not change are marked as unchanged');
+    ok(d.some((p) => p.op === 'del') && d.some((p) => p.op === 'add'),
+       'and the ones that did are marked on both sides');
+
+    // Identical text has nothing to report, and a diff against nothing is all
+    // addition — the two ends the changes list actually hits.
+    const same = VibeReviseEditor.diffWords('No change here.', 'No change here.');
+    ok(same.every((p) => p.op === 'same'), 'identical text is entirely unchanged');
+    eq(VibeReviseEditor.diffWords('', 'All new.').map((p) => p.op).join(),
+       'add', 'and text added from nothing is entirely an addition');
+  }
+
   // Put the editor back the way the rest of the page expects it.
   VibeReviseEditor.init({ trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html' });
 
