@@ -162,10 +162,13 @@ similar, with plausible business content.
 
 ## Before submitting
 
-- [ ] Put a contact address into `store/PRIVACY.md` — and replace the work
-      address in `packages/html-splice/COMMERCIAL.md` with the same one. A
-      product kept separate from your employer should not publish your
-      employer's email.
+- [ ] Set a contact address. `packages/html-splice/COMMERCIAL.md` currently
+      says `CONTACT-ADDRESS-NOT-SET`, which is deliberate — it fails loudly
+      rather than shipping a wrong address quietly. `store/PRIVACY.md` needs
+      the same one. Use an address for this product, not a work address.
+- [ ] Set `git config user.email` for this repository. Until it is set,
+      commits are attributed to whatever the global identity is, and the
+      existing history carries the old one.
 - [ ] Publish `store/PRIVACY.md` and paste its URL into the privacy field.
 - [ ] Decide the npm name for the engine package — `html-text-splice` may be taken.
 - [ ] Read the IP assignment clause in the employment contract.

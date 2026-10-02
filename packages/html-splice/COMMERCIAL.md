@@ -30,7 +30,7 @@ OEM/redistribution arrangement. Perpetual licence, per product.
 
 ## Getting one
 
-Email **cara.bertram@azzo.com.au** with:
+Email **CONTACT-ADDRESS-NOT-SET** with:
 
 1. The product it would go into, and roughly what it does.
 2. Whether it ships to customers, runs as a hosted service, or both.
