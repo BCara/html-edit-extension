@@ -36,6 +36,7 @@
   var Blocks = root.VibeReviseBlocks;
   var Comments = root.VibeReviseComments;
   var Structures = root.VibeReviseStructures;
+  var AI = root.VibeReviseAI;     // absent in a host that offers no AI at all
 
   var UI_ATTR = 'data-viberevise-ui';
   var MODE_ATTR = 'data-vr-mode';
@@ -102,11 +103,18 @@
 
   var state = {
     active: false,
+    paused: false,        // edit mode on, but the page handed back for selecting and copying
     doc: null,            // the document being edited; null means this one
     win: null,
     settings: null,       // host storage: { get(key), set(key, value) }
     author: '',           // the name the user typed, self-declared
-    assist: null,         // the layer holding the AI chip, AI card, changes list
+    assist: null,         // the layer holding the changes list and AI suggestions
+    // AI, when the host offers it: { status(), complete(req), openSettings() }.
+    // Null means there is no AI here at all, and none of its UI is drawn.
+    ai: null,
+    aiStatus: null,       // { configured, label, problem }, as the host last said
+    aiJob: null,          // the request in flight, so it can be cancelled
+    suggestions: [],      // AI suggestions waiting for accept or dismiss
     nudgedName: false,    // suggested adding a name once already
     source: '',
     map: null,
@@ -216,6 +224,11 @@
     // Undo and redo are used far more often than Save, and always as a pair,
     // so they get the compact treatment and sit together behind a divider.
     'button.icon { padding: 4px 8px; font-size: 14px; line-height: 1; }',
+    // Paused: only what still makes sense with editing off. Save stays, because
+    // the edits are still there and still unsaved.
+    '.bar.paused .dot { background: #d9a01e; }',
+    '.bar.paused .insert, .bar.paused .menu, .bar.paused .undo, .bar.paused .redo,',
+    '.bar.paused .more-btn, .bar.paused .panel, .bar.paused .ai-btn, .bar.paused .sep { display: none; }',
     '.sep { width: 1px; align-self: stretch; margin: 2px 1px; background: rgba(255, 255, 255, .16); flex: none; }',
     // The count reads as text but opens the list of changes.
     'button.count { background: transparent; padding: 4px 6px; color: #a5aab8; }',
@@ -278,6 +291,28 @@
     '  padding: 4px 10px 6px; color: #8f95a3; font-size: 11px; max-width: 20em;',
     '  white-space: normal;',
     '}',
+    // AI. The count on the button is suggestions still waiting for an answer,
+    // in the same amber as anything else that wants attention.
+    'button.ai-btn { display: inline-flex; align-items: center; gap: 5px; }',
+    'button.ai-btn[aria-expanded="true"] { background: rgba(255, 255, 255, .24); }',
+    '.ai-n { background: #d9a01e; color: #231d10; border-radius: 999px; padding: 0 6px;',
+    '  font-size: 10.5px; font-weight: 700; line-height: 16px; }',
+    '.ai-n[hidden], .ai-panel [hidden] { display: none; }',
+    '.ai-panel { width: 320px; }',
+    '.ai-status { color: #c6cbd6; font-size: 11.5px; overflow-wrap: anywhere; }',
+    '.ai-status.warn { color: #ffd08a; }',
+    '.ai-head-btn { padding: 2px 9px; font-size: 11px; }',
+    '.ai-section { display: flex; flex-direction: column; gap: 7px; }',
+    '.ai-target { color: #c6cbd6; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }',
+    '.ai-chips { display: flex; flex-wrap: wrap; gap: 5px; }',
+    '.ai-chips button { padding: 3px 9px; font-size: 11.5px; }',
+    '.ai-busy { display: flex; align-items: center; gap: 8px; color: #c6cbd6; }',
+    '.ai-busy-text { flex: 1; }',
+    '.ai-spin { width: 12px; height: 12px; border-radius: 50%; flex: none;',
+    '  border: 2px solid rgba(255, 255, 255, .25); border-top-color: #7c74ff;',
+    '  animation: ai-spin .8s linear infinite; }',
+    '@keyframes ai-spin { to { transform: rotate(360deg); } }',
+    '@media (prefers-reduced-motion: reduce) { .ai-spin { animation: none; } }',
   ].join('\n');
 
   // --- small helpers ---------------------------------------------------------
@@ -673,6 +708,27 @@
     refresh();
   }
 
+  /*
+   * Several regions changed as one step — an accepted AI suggestion, which is
+   * one change to one paragraph however many runs of text it touched. Undo
+   * puts every run back, and who did it and whether AI suggested it go back
+   * with them.
+   */
+  function applyMulti(entry, forward) {
+    for (var i = 0; i < entry.changes.length; i++) {
+      var c = entry.changes[i];
+      var value = forward ? c.after : c.before;
+      Islands.writeValue(c.region.island, value);
+      c.region.current = value;
+      c.region.ai = forward ? true : c.aiBefore;
+      c.region.by = forward ? entry.by : c.byBefore;
+      markChanged(c.region);
+    }
+    state.lastTouch = 0;
+    refresh();
+    positionCards();
+  }
+
   // Take an added block back out of the page, or put it back.
   function setAdded(region, present) {
     if (present === !region.removed) return;
@@ -970,10 +1026,13 @@
     // Esc closes the insert menu, and is checked before the modifier gate
     // below because it carries no modifier.
     if (e.key === 'Escape' &&
-        (isMenuOpen() || isAddMenuOpen() || isMoreOpen() || isChangesOpen())) {
+        (isMenuOpen() || isAddMenuOpen() || isMoreOpen() || isChangesOpen() ||
+         isAIOpen() || isReviewOpen())) {
       e.preventDefault();
       setMenuOpen(false);
       setMoreOpen(false);
+      setAIOpen(false);
+      closeReview();
       if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
       closeChanges();
       return;
@@ -1325,6 +1384,7 @@
     // reaching here means the click was somewhere else.
     if (isMenuOpen()) setMenuOpen(false);
     if (isMoreOpen()) setMoreOpen(false);
+    if (isAIOpen()) setAIOpen(false);
     if (isAddMenuOpen()) { setAddMenuOpen(false); hideAdd(); }
   }
 
@@ -1605,7 +1665,10 @@
     }
   }
 
-  function addCommentTo(block) {
+  // opts.text and opts.author fill the note in, for a reply AI drafted; such a
+  // note is not focused, because nobody is about to type into it.
+  function addCommentTo(block, opts) {
+    opts = opts || {};
     if (!block) return null;
     flushCommentEdit();
     var anchor = Comments.anchorFor(state.map, state.source, block);
@@ -1613,7 +1676,7 @@
       flash('VibeRevise cannot tell where this section starts in the file');
       return null;
     }
-    if (!authorName() && !state.nudgedName) {
+    if (!authorName() && !state.nudgedName && !opts.text) {
       state.nudgedName = true;
       flash('Tip: add your name from ⋯ so people can see who wrote this');
     }
@@ -1623,9 +1686,9 @@
       node: null,
       element: null,
       block: block,
-      author: authorName(),
+      author: opts.author != null ? opts.author : authorName(),
       date: Comments.today(),
-      text: '',
+      text: opts.text || '',
       original: '',
       saved: null,            // not in the file at all until it is written
       savedVisible: false,
@@ -1636,7 +1699,7 @@
     state.comments.push(region);
     pushHistory({ kind: 'comment-add', region: region });
     hideAdd();
-    renderRail(region);
+    renderRail(opts.text ? null : region);
     refresh();
     return region;
   }
@@ -1810,6 +1873,8 @@
           (isReply ? 'Write a reply…' : 'Write a comment…') + '"></textarea>' +
         '<div class="foot">' +
           '<button class="reply-btn" title="Add a reply to this thread">Reply</button>' +
+          (state.ai ? '<button class="reply-btn ask-ai" title="Have AI draft a reply, and ' +
+            'suggest a change to the passage if the thread asks for one">Ask AI</button>' : '') +
         '</div>';
 
       // Whoever the note says wrote it; a new one is the current user's until
@@ -1848,6 +1913,8 @@
       card.querySelector('.reply-btn').addEventListener('click', function () {
         addCommentTo(region.block);
       });
+      var askAI = card.querySelector('.ask-ai');
+      if (askAI) askAI.addEventListener('click', function () { aiReplyTo(region); });
 
       rail.list.appendChild(card);
       region.card = card;
@@ -1975,7 +2042,9 @@
           '<div class="p-sep"></div>' +
           '<button class="p-changes">Show changes</button>' +
         '</div>' +
+        (state.ai ? AI_MARKUP : '') +
         '<button class="save primary" disabled>Save</button>' +
+        '<button class="pause" title="Stop editing for now, so you can select and copy text">Pause</button>' +
         '<button class="done">Done</button>' +
       '</div>';
 
@@ -1991,6 +2060,9 @@
       redo: shadow.querySelector('.redo'),
       save: shadow.querySelector('.save'),
       done: shadow.querySelector('.done'),
+      pause: shadow.querySelector('.pause'),
+      bar: shadow.querySelector('.bar'),
+      label: shadow.querySelector('.label'),
       moreBtn: shadow.querySelector('.more-btn'),
       panel: shadow.querySelector('.panel'),
       authorInput: shadow.querySelector('.p-input'),
@@ -2035,6 +2107,7 @@
     ui.redo.addEventListener('mousedown', function (e) { e.preventDefault(); redo(); });
     ui.save.addEventListener('click', function () { save(); });
     ui.done.addEventListener('click', function () { setActive(false); });
+    ui.pause.addEventListener('click', function () { setPaused(!state.paused); });
 
     ui.count.addEventListener('mousedown', function (e) {
       e.preventDefault();
@@ -2063,6 +2136,7 @@
       openChanges();
     });
     state.ui = ui;
+    if (state.ai) wireAIPanel(shadow);
   }
 
   /*
@@ -2071,6 +2145,7 @@
    */
   function setMenuOpen(open) {
     if (!state.ui) return;
+    if (open) setAIOpen(false);
     state.ui.menu.hidden = !open;
     state.ui.insert.textContent = 'Insert ' + (open ? '\u25b4' : '\u25be');
   }
@@ -2156,6 +2231,7 @@
     state.ui.panel.hidden = !open;
     if (open) {
       setMenuOpen(false);
+      setAIOpen(false);
       renderMore();
       state.ui.authorInput.value = authorName();
     }
@@ -2203,9 +2279,10 @@
           list.push(group);
         }
         if (r.by) group.by = r.by;
+        if (r.ai) group.ai = true;
       } else if (r.kind === 'insert' && !r.removed && r.current) {
         list.push({ kind: 'added', what: describeTag(r.template.tag), after: r.current,
-                    by: r.by, target: r.element });
+                    by: r.by, ai: !!r.ai, target: r.element });
       }
     }
     // Each group's before and after is the whole block's text, unchanged runs
@@ -2253,10 +2330,11 @@
 
   function changeHeading(ch) {
     var who = displayName(ch.by);
+    var ai = ch.ai ? ' (AI suggested)' : '';
     if (ch.kind === 'edit') {
-      return who + ' · edited';
+      return who + ' · edited' + ai;
     }
-    if (ch.kind === 'added') return who + ' · added a ' + ch.what;
+    if (ch.kind === 'added') return who + ' · added a ' + ch.what + ai;
     if (ch.kind === 'comment-add') return who + ' · added a comment';
     if (ch.kind === 'comment-edit') return 'Comment edited' + (ch.by ? ' (' + ch.by + '’s)' : '');
     return 'Comment deleted' + (ch.by ? ' (' + ch.by + '’s)' : '');
@@ -2327,6 +2405,7 @@
   }
 
   function openChanges() {
+    closeReview();
     ensureAssist().changes.hidden = false;
     renderChanges();
   }
@@ -2421,6 +2500,29 @@
     'del { color: #ff9f9f; text-decoration: line-through; text-decoration-color: rgba(255,159,159,.7); }',
     'del + ins, ins + del { margin-left: .3em; }',
     'ins { color: #9fe0b5; text-decoration: none; background: rgba(159, 224, 181, .12); border-radius: 3px; }',
+    '.review {',
+    '  position: absolute; pointer-events: auto; box-sizing: border-box;',
+    '  border-radius: 12px; background: rgba(22, 22, 27, .97);',
+    '  box-shadow: 0 6px 28px rgba(0, 0, 0, .45);',
+    '  right: 16px; bottom: 70px; width: 420px; max-width: calc(100vw - 32px);',
+    '  max-height: 62vh; overflow: auto; padding: 12px;',
+    '  display: flex; flex-direction: column; gap: 8px;',
+    '}',
+    '.r-tools { display: flex; gap: 6px; align-items: center; }',
+    '.pill { padding: 4px 11px; border-radius: 999px; background: rgba(255, 255, 255, .13); font-size: 12px; }',
+    '.pill:hover { background: rgba(255, 255, 255, .22); }',
+    '.pill.primary { background: #5b52f0; }',
+    '.pill.primary:hover { background: #6d64ff; }',
+    '.pill:disabled { opacity: .4; cursor: default; }',
+    '.s-item { padding: 9px 10px; border-radius: 8px; background: rgba(255, 255, 255, .06);',
+    '  border-left: 3px solid #7c74ff; display: flex; flex-direction: column; gap: 6px; }',
+    '.s-item.stale { border-left-color: #ff9f9f; }',
+    '.s-head { display: flex; gap: 8px; align-items: baseline; }',
+    '.s-what { font-weight: 600; font-size: 12px; flex: 1; }',
+    '.s-show { background: transparent; color: #9aa0ad; font-size: 11.5px; padding: 0 4px; border-radius: 4px; }',
+    '.s-show:hover { color: #fff; background: rgba(255, 255, 255, .1); }',
+    '.s-why { color: #9aa0ad; font-size: 11.5px; }',
+    '.s-stale { color: #ffb3b3; font-size: 11.5px; }',
   ].join('\n');
 
   function ensureAssist() {
@@ -2438,13 +2540,19 @@
     shadow.innerHTML = '<style>' + ASSIST_CSS + '</style>' +
       '<div class="layer">' +
         '<div class="changes" hidden role="dialog" aria-label="Changes"></div>' +
+        '<div class="review" hidden role="dialog" aria-label="AI suggestions"></div>' +
       '</div>';
     doc().documentElement.appendChild(host);
 
     // A click inside the list is not a click "away" from it.
     shadow.querySelector('.changes').addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    shadow.querySelector('.review').addEventListener('mousedown', function (e) { e.stopPropagation(); });
 
-    state.assist = { host: host, changes: shadow.querySelector('.changes') };
+    state.assist = {
+      host: host,
+      changes: shadow.querySelector('.changes'),
+      review: shadow.querySelector('.review'),
+    };
     return state.assist;
   }
 
@@ -2453,6 +2561,636 @@
       state.assist.host.parentNode.removeChild(state.assist.host);
     }
     state.assist = null;
+  }
+
+
+  // --- AI suggestions --------------------------------------------------------
+
+  /*
+   * Off unless the host offers it and the user has added a key.
+   *
+   * Every route here ends the same way: a SUGGESTION, shown as a before/after
+   * of the paragraph, which changes nothing until it is accepted. Accepting is
+   * one undo step, and the list of changes says the edit was AI-suggested. The
+   * answer can only ever land in the runs of text a person could have typed
+   * into, so the markup is exactly as safe as it is from the keyboard.
+   *
+   * What leaves the browser is the words of the paragraphs involved — split at
+   * their formatting, so the answer can go back without moving a tag — and,
+   * for a rewrite, a little of the text either side for context. Never the
+   * file, never the markup.
+   */
+  var AI_CHIPS = [
+    ['Tighten', 'Make it tighter and more direct without losing any meaning.'],
+    ['Fix grammar', 'Fix spelling, grammar and punctuation only.'],
+    ['Plainer', 'Rewrite it in plainer language a general reader would follow.'],
+    ['More formal', 'Make the tone more formal and professional.'],
+  ];
+
+  var AI_MARKUP =
+    '<button class="ai-btn" title="AI suggestions" aria-label="AI suggestions" ' +
+            'aria-expanded="false">✦ AI<span class="ai-n" hidden></span></button>' +
+    '<div class="panel ai-panel" hidden>' +
+      '<div class="p-head">' +
+        '<span class="p-title">AI suggestions</span>' +
+        '<button class="ai-head-btn ai-settings" title="Provider, model and key">Settings</button>' +
+      '</div>' +
+      '<div class="ai-status"></div>' +
+      '<div class="ai-section ai-setup" hidden>' +
+        '<div class="p-hint">Use your own API key — Claude, OpenAI, Gemini, OpenRouter, or a ' +
+          'model running on your own computer. Nothing is sent until you ask for a ' +
+          'suggestion, and nothing changes until you accept one.</div>' +
+        '<button class="primary ai-setup-btn">Set up AI</button>' +
+      '</div>' +
+      '<div class="ai-section ai-ready" hidden>' +
+        '<div class="ai-target"></div>' +
+        '<div class="ai-chips">' +
+          AI_CHIPS.map(function (c, i) {
+            return '<button data-chip="' + i + '" title="' + c[1] + '">' + c[0] + '</button>';
+          }).join('') +
+        '</div>' +
+        '<div class="p-row">' +
+          '<input class="p-input ai-instruction" maxlength="300" ' +
+                 'aria-label="What to change" placeholder="Or say what to change…">' +
+          '<button class="ai-go">Suggest</button>' +
+        '</div>' +
+        '<div class="p-sep"></div>' +
+        '<button class="p-changes ai-proofread">Proofread the whole document</button>' +
+        '<button class="p-changes ai-review-btn" hidden></button>' +
+        '<div class="p-hint ai-disclose"></div>' +
+      '</div>' +
+      '<div class="ai-busy" hidden>' +
+        '<span class="ai-spin" aria-hidden="true"></span>' +
+        '<span class="ai-busy-text" role="status"></span>' +
+        '<button class="ai-cancel">Cancel</button>' +
+      '</div>' +
+    '</div>';
+
+  function wireAIPanel(shadow) {
+    var ui = state.ui;
+    ui.aiBtn = shadow.querySelector('.ai-btn');
+    ui.aiCount = shadow.querySelector('.ai-n');
+    ui.aiPanel = shadow.querySelector('.ai-panel');
+    ui.aiStatus = shadow.querySelector('.ai-status');
+    ui.aiSetup = shadow.querySelector('.ai-setup');
+    ui.aiReady = shadow.querySelector('.ai-ready');
+    ui.aiTarget = shadow.querySelector('.ai-target');
+    ui.aiInstruction = shadow.querySelector('.ai-instruction');
+    ui.aiReviewBtn = shadow.querySelector('.ai-review-btn');
+    ui.aiDisclose = shadow.querySelector('.ai-disclose');
+    ui.aiBusy = shadow.querySelector('.ai-busy');
+    ui.aiBusyText = shadow.querySelector('.ai-busy-text');
+
+    // mousedown with the default prevented, like Insert: opening the panel
+    // must not take the caret out of the paragraph it is about to work on.
+    ui.aiBtn.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      setAIOpen(ui.aiPanel.hidden);
+    });
+    ui.aiPanel.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+
+    function settings() { setAIOpen(false); state.ai.openSettings(); }
+    shadow.querySelector('.ai-settings').addEventListener('click', settings);
+    shadow.querySelector('.ai-setup-btn').addEventListener('click', settings);
+
+    shadow.querySelector('.ai-chips').addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('button[data-chip]');
+      if (btn) aiRewrite(null, AI_CHIPS[+btn.getAttribute('data-chip')][1]);
+    });
+    function go() {
+      var text = ui.aiInstruction.value.trim();
+      if (!text) { ui.aiInstruction.focus(); return; }
+      aiRewrite(null, text);
+    }
+    shadow.querySelector('.ai-go').addEventListener('click', go);
+    ui.aiInstruction.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); go(); }
+      e.stopPropagation();        // typing an instruction is not an editing shortcut
+    });
+    shadow.querySelector('.ai-proofread').addEventListener('click', function () { aiProofread(); });
+    ui.aiReviewBtn.addEventListener('click', function () { setAIOpen(false); openReview(); });
+    shadow.querySelector('.ai-cancel').addEventListener('click', cancelAI);
+    renderAI();
+  }
+
+  function setAIOpen(open) {
+    if (!state.ui || !state.ui.aiPanel) return;
+    state.ui.aiPanel.hidden = !open;
+    state.ui.aiBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) {
+      setMenuOpen(false);
+      setMoreOpen(false);
+      renderAI();
+      // The key may have been added in another tab since this page asked.
+      refreshAIStatus();
+    }
+  }
+
+  function isAIOpen() { return !!(state.ui && state.ui.aiPanel && !state.ui.aiPanel.hidden); }
+
+  function refreshAIStatus() {
+    if (!state.ai) return Promise.resolve(null);
+    return Promise.resolve(state.ai.status()).then(function (st) {
+      state.aiStatus = st || { configured: false };
+      renderAI();
+      return state.aiStatus;
+    }).catch(function (err) {
+      state.aiStatus = { configured: false, problem: String(err && err.message || err) };
+      renderAI();
+      return state.aiStatus;
+    });
+  }
+
+  function aiReady() { return !!(state.ai && state.aiStatus && state.aiStatus.configured); }
+
+  function renderAI() {
+    var ui = state.ui;
+    if (!ui || !ui.aiPanel) return;
+    var st = state.aiStatus;
+    var n = pendingSuggestions().length;
+
+    ui.aiCount.hidden = n === 0;
+    ui.aiCount.textContent = String(n);
+
+    var busy = !!state.aiJob;
+    ui.aiBusy.hidden = !busy;
+    if (busy) ui.aiBusyText.textContent = state.aiJob.label;
+
+    if (!st) {
+      ui.aiStatus.textContent = 'Checking AI settings…';
+      ui.aiStatus.className = 'ai-status';
+      ui.aiSetup.hidden = true;
+      ui.aiReady.hidden = true;
+      return;
+    }
+    ui.aiStatus.textContent = st.configured ? st.label : (st.problem || 'Not set up yet.');
+    ui.aiStatus.className = 'ai-status' + (st.configured ? '' : ' warn');
+    ui.aiSetup.hidden = st.configured;
+    ui.aiReady.hidden = !st.configured || busy;
+
+    var target = aiTarget();
+    ui.aiTarget.textContent = target
+      ? 'Rewrite this ' + describeTag(target.block.localName || 'block') + ': “' +
+        visible(target.regions.map(function (r) { return r.current; }).join('')).trim().slice(0, 60) + '”'
+      : 'Click into a paragraph, then choose how to rewrite it.';
+
+    ui.aiReviewBtn.hidden = n === 0;
+    ui.aiReviewBtn.textContent = 'Review suggestions (' + n + ')';
+    ui.aiDisclose.textContent = 'Sends only the words of the paragraphs involved to ' +
+      (st.host || 'your AI provider') + '. Nothing changes until you accept.';
+  }
+
+  /*
+   * The runs of text that make up one block, in order: the islands whose own
+   * block is this one. A nested block — a list inside a section — is its own
+   * paragraph, not part of its container's.
+   */
+  function runsOf(block) {
+    var out = [];
+    if (!block || !block.querySelectorAll) return out;
+    var islands = block.querySelectorAll('[' + Islands.ATTR + ']');
+    for (var i = 0; i < islands.length; i++) {
+      var r = regionOf(islands[i]);
+      if (!r || r.removed || (r.tree && r.tree.removed)) continue;
+      if ((Blocks.blockFor(islands[i]) || islands[i]) !== block) continue;
+      out.push(r);
+    }
+    return out;
+  }
+
+  // Every paragraph in the document, in order, as { block, regions }.
+  function allBlocks() {
+    var seen = new Map();
+    var list = [];
+    var islands = doc().querySelectorAll('[' + Islands.ATTR + ']');
+    for (var i = 0; i < islands.length; i++) {
+      var r = regionOf(islands[i]);
+      if (!r || r.removed || (r.tree && r.tree.removed)) continue;
+      var block = Blocks.blockFor(islands[i]) || islands[i];
+      var entry = seen.get(block);
+      if (!entry) {
+        entry = { block: block, regions: [] };
+        seen.set(block, entry);
+        list.push(entry);
+      }
+      entry.regions.push(r);
+    }
+    return list;
+  }
+
+  function textOfRegions(regions) {
+    return regions.map(function (r) { return r.current; }).join('');
+  }
+
+  // The paragraph the caret is in, or was in before the toolbar took focus.
+  function aiTarget() {
+    var island = islandOf(doc().activeElement);
+    if (!island && state.lastIsland && state.lastIsland.isConnected) island = state.lastIsland;
+    if (!island || !regionOf(island)) return null;
+    var block = Blocks.blockFor(island) || island;
+    var regions = runsOf(block);
+    if (!regions.length) regions = [regionOf(island)];
+    return { block: block, regions: regions };
+  }
+
+  /*
+   * Run one request as the job in flight. One at a time: a second request
+   * while the first is out would leave two sets of answers racing each other
+   * for the same paragraphs.
+   */
+  function runAI(label, fn) {
+    if (!state.ai) return Promise.resolve(null);
+    if (state.aiJob) { flash('AI is still working on the last request'); return Promise.resolve(null); }
+    var job = { label: label, cancelled: false };
+    state.aiJob = job;
+    renderAI();
+    flash(label);
+
+    return refreshAIStatus().then(function (st) {
+      if (!st || !st.configured) {
+        flash('Set up AI first — ' + ((st && st.problem) || 'add your API key'));
+        setAIOpen(true);
+        return null;
+      }
+      return fn(job);
+    }).catch(function (err) {
+      flash('AI failed: ' + (err && err.message || err));
+      return null;
+    }).then(function (result) {
+      if (state.aiJob === job) state.aiJob = null;
+      renderAI();
+      return result;
+    });
+  }
+
+  function cancelAI() {
+    if (!state.aiJob) return;
+    state.aiJob.cancelled = true;
+    state.aiJob = null;
+    flash('Cancelled — anything already on its way back will be ignored');
+    renderAI();
+  }
+
+  // Ask, and read the JSON out of the answer. { ok, data } or { ok:false, message }.
+  function askAI(req, job) {
+    return Promise.resolve(state.ai.complete(req)).then(function (res) {
+      if (job.cancelled) return { ok: false, cancelled: true };
+      if (!res || !res.ok) return { ok: false, message: (res && res.message) || 'No answer.' };
+      var data = AI.parseJson(res.text);
+      if (!data) {
+        return { ok: false, message: res.truncated
+          ? 'The answer was cut off before it finished. Try a shorter passage.'
+          : 'The answer was not in a form VibeRevise can use.' };
+      }
+      return { ok: true, data: data };
+    });
+  }
+
+  /*
+   * A suggestion: the regions it covers, what they held when it was asked
+   * for, and what it proposes. If any of them has changed since, it is stale
+   * and will not be applied — mapping an answer onto words the model never saw
+   * would be guessing.
+   */
+  function addSuggestion(kind, what, why, block, regions, after) {
+    var s = {
+      kind: kind,
+      what: what,
+      why: why || '',
+      block: block,
+      regions: regions,
+      basis: regions.map(function (r) { return r.current; }),
+      after: after,
+    };
+    // A newer suggestion for the same paragraph replaces an older one.
+    state.suggestions = state.suggestions.filter(function (o) { return o.block !== block; });
+    state.suggestions.push(s);
+    return s;
+  }
+
+  function isStale(s) {
+    for (var i = 0; i < s.regions.length; i++) {
+      var r = s.regions[i];
+      if (r.removed || (r.tree && r.tree.removed) || r.current !== s.basis[i]) return true;
+    }
+    return false;
+  }
+
+  function pendingSuggestions() { return state.suggestions; }
+
+  function neighbourText(block, step) {
+    var blocks = allBlocks();
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i].block !== block) continue;
+      var other = blocks[i + step];
+      if (!other) return '';
+      var t = AI.toModel(textOfRegions(other.regions));
+      return step < 0 ? t.slice(-400) : t.slice(0, 400);
+    }
+    return '';
+  }
+
+  function aiRewrite(target, instruction) {
+    target = target || aiTarget();
+    if (!target) { flash('Click into the paragraph you want rewritten first'); return Promise.resolve(null); }
+    var regions = target.regions;
+    var original = regions.map(function (r) { return r.current; });
+    if (!AI.toModel(original.join('')).trim()) {
+      flash('That paragraph is empty — type something first');
+      return Promise.resolve(null);
+    }
+    var what = describeTag(target.block.localName || 'block');
+
+    return runAI('Asking for a rewrite of this ' + what + '…', function (job) {
+      var req = AI.rewriteRequest({
+        runs: original,
+        instruction: instruction,
+        kind: what,
+        before: neighbourText(target.block, -1),
+        after: neighbourText(target.block, 1),
+      });
+      return askAI(req, job).then(function (res) {
+        if (res.cancelled) return null;
+        if (!res.ok) { flash('AI: ' + res.message); return null; }
+        var aligned = AI.alignRuns(original, res.data.runs);
+        if (!aligned.ok) { flash(aligned.problem); return null; }
+        if (!aligned.changed) { flash('AI suggests leaving this ' + what + ' as it is'); return null; }
+        var s = addSuggestion('rewrite', 'Rewrite this ' + what,
+          typeof res.data.note === 'string' ? res.data.note : '', target.block, regions, aligned.runs);
+        setAIOpen(false);
+        openReview();
+        flash('Suggestion ready \u2014 accept or dismiss it');
+        return s;
+      });
+    });
+  }
+
+  /*
+   * Every paragraph, a batch at a time. A batch that fails stops the run but
+   * keeps what earlier batches found: those suggestions are as good as they
+   * were a moment ago.
+   */
+  function aiProofread() {
+    var blocks = allBlocks().filter(function (b) {
+      return AI.toModel(textOfRegions(b.regions)).replace(/\s/g, '').length >= 3;
+    });
+    if (!blocks.length) { flash('There is no text here to proofread'); return Promise.resolve(null); }
+
+    var items = blocks.map(function (b, i) {
+      return {
+        id: 'p' + (i + 1),
+        runs: b.regions.map(function (r) { return r.current; }),
+        block: b.block,
+        regions: b.regions,
+      };
+    });
+    var byId = new Map(items.map(function (it) { return [it.id, it]; }));
+    var chunks = AI.chunkBlocks(items);
+
+    return runAI('Proofreading…', function (job) {
+      var found = 0;
+      var i = 0;
+      function next() {
+        if (job.cancelled) return null;
+        if (i >= chunks.length) {
+          flash(found ? 'Proofreading found ' + found + ' thing' + (found === 1 ? '' : 's') + ' to fix'
+                      : 'Proofreading found nothing to fix');
+          if (found) { setAIOpen(false); openReview(); }
+          return found;
+        }
+        job.label = chunks.length > 1
+          ? 'Proofreading… part ' + (i + 1) + ' of ' + chunks.length
+          : 'Proofreading…';
+        renderAI();
+        var chunk = chunks[i++];
+        return askAI(AI.proofreadRequest(chunk), job).then(function (res) {
+          if (res.cancelled) return null;
+          if (!res.ok) {
+            flash('AI: ' + res.message + (found ? ' (' + found + ' found before that)' : ''));
+            if (found) openReview();
+            return found;
+          }
+          var fixes = Array.isArray(res.data.fixes) ? res.data.fixes : [];
+          fixes.forEach(function (fix) {
+            var it = fix && byId.get(fix.id);
+            // Only paragraphs that were in THIS batch, and only once each.
+            if (!it || chunk.indexOf(it) === -1) return;
+            var aligned = AI.alignRuns(it.runs, fix.runs);
+            if (!aligned.ok || !aligned.changed) return;
+            addSuggestion('proofread', 'Proofreading · ' + describeTag(it.block.localName || 'block'),
+              typeof fix.why === 'string' ? fix.why : '', it.block, it.regions, aligned.runs);
+            found++;
+          });
+          renderReview();
+          return next();
+        });
+      }
+      return next();
+    });
+  }
+
+  // How an AI-drafted note is signed. Honest about where the words came from,
+  // and still the user's: they asked for it and can edit it before saving.
+  function aiAuthor() {
+    return authorName() ? authorName() + ' (AI draft)' : 'AI draft';
+  }
+
+  function aiReplyTo(region) {
+    flushCommentEdit();
+    var block = region.block;
+    var thread = liveComments().filter(function (c) {
+      return c.block === block && c.text.trim();
+    });
+    if (!thread.length) { flash('Write the comment first, then ask AI'); return Promise.resolve(null); }
+    var regions = runsOf(block);
+    var original = regions.map(function (r) { return r.current; });
+
+    return runAI('Asking AI about this comment thread…', function (job) {
+      var req = AI.commentRequest({
+        runs: original,
+        thread: thread.map(function (c) {
+          return { author: c.token ? c.author : (c.author || authorName()), text: c.text.trim() };
+        }),
+      });
+      return askAI(req, job).then(function (res) {
+        if (res.cancelled) return null;
+        if (!res.ok) { flash('AI: ' + res.message); return null; }
+        var reply = typeof res.data.reply === 'string' ? res.data.reply.trim() : '';
+        var out = { reply: null, suggestion: null };
+        if (reply) out.reply = addCommentTo(block, { text: reply, author: aiAuthor() });
+
+        var runs = res.data.runs;
+        if (regions.length && Array.isArray(runs) && runs.length) {
+          var aligned = AI.alignRuns(original, runs);
+          if (aligned.ok && aligned.changed) {
+            out.suggestion = addSuggestion('comment', 'Change asked for in the comments',
+              reply.slice(0, 160), block, regions, aligned.runs);
+            openReview();
+          }
+        }
+        flash(out.suggestion ? 'AI drafted a reply and suggested a change — review it before saving'
+          : out.reply ? 'AI drafted a reply — edit it or delete it before saving'
+          : 'AI had nothing to add');
+        return out;
+      });
+    });
+  }
+
+  function acceptSuggestion(s) {
+    if (state.suggestions.indexOf(s) === -1) return false;
+    if (isStale(s)) {
+      flash('That paragraph has changed since — dismiss this and ask again');
+      renderReview();
+      return false;
+    }
+    var changes = [];
+    for (var i = 0; i < s.regions.length; i++) {
+      var r = s.regions[i];
+      if (s.after[i] === r.current) continue;
+      changes.push({ region: r, before: r.current, after: s.after[i], aiBefore: !!r.ai, byBefore: r.by });
+    }
+    state.suggestions.splice(state.suggestions.indexOf(s), 1);
+    if (changes.length) {
+      var entry = { kind: 'multi', changes: changes, by: authorName() };
+      pushHistory(entry);
+      applyMulti(entry, true);
+    }
+    renderReview();
+    renderAI();
+    return true;
+  }
+
+  function dismissSuggestion(s) {
+    var at = state.suggestions.indexOf(s);
+    if (at === -1) return false;
+    state.suggestions.splice(at, 1);
+    renderReview();
+    renderAI();
+    return true;
+  }
+
+  function acceptAll() {
+    var n = 0;
+    state.suggestions.slice().forEach(function (s) {
+      if (!isStale(s) && acceptSuggestion(s)) n++;
+    });
+    flash(n ? 'Applied ' + n + ' suggestion' + (n === 1 ? '' : 's') + ' — Ctrl/Cmd+Z undoes them one at a time'
+            : 'Nothing could be applied — the paragraphs have changed since');
+    return n;
+  }
+
+  function openReview() {
+    var assist = ensureAssist();
+    assist.changes.hidden = true;
+    assist.review.hidden = false;
+    renderReview();
+  }
+  function closeReview() { if (state.assist) state.assist.review.hidden = true; }
+  function isReviewOpen() { return !!(state.assist && !state.assist.review.hidden); }
+
+  function renderReview() {
+    if (!state.assist || state.assist.review.hidden) return;
+    var box = state.assist.review;
+    var list = state.suggestions;
+    box.textContent = '';
+
+    var head = doc().createElement('div');
+    head.className = 'c-head';
+    var title = doc().createElement('strong');
+    title.textContent = list.length ? 'AI suggestions (' + list.length + ')' : 'No suggestions waiting';
+    var tools = doc().createElement('span');
+    tools.className = 'r-tools';
+    if (list.length > 1) {
+      var all = doc().createElement('button');
+      all.className = 'pill primary';
+      all.textContent = 'Accept all';
+      all.addEventListener('click', acceptAll);
+      tools.appendChild(all);
+    }
+    var close = doc().createElement('button');
+    close.className = 'x';
+    close.title = 'Close — suggestions keep until you accept or dismiss them';
+    close.textContent = '×';
+    close.addEventListener('click', closeReview);
+    tools.appendChild(close);
+    head.appendChild(title);
+    head.appendChild(tools);
+    box.appendChild(head);
+
+    var note = doc().createElement('div');
+    note.className = 'c-note';
+    note.textContent = list.length
+      ? 'Nothing changes until you accept. Accepting is one undo step, and the list of changes marks it as AI-suggested.'
+      : 'Ask for a rewrite or a proofread from the ✦ AI button.';
+    box.appendChild(note);
+
+    list.forEach(function (s) {
+      var stale = isStale(s);
+      var item = doc().createElement('div');
+      item.className = 's-item' + (stale ? ' stale' : '');
+
+      var top = doc().createElement('div');
+      top.className = 's-head';
+      var what = doc().createElement('span');
+      what.className = 's-what';
+      what.textContent = s.what;
+      var show = doc().createElement('button');
+      show.className = 's-show';
+      show.textContent = 'Show';
+      show.addEventListener('click', function () {
+        if (!s.block || !s.block.isConnected) return;
+        s.block.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        s.block.setAttribute(ACTIVE_ATTR, '');
+        setTimeout(function () { s.block.removeAttribute(ACTIVE_ATTR); }, 1400);
+      });
+      top.appendChild(what);
+      top.appendChild(show);
+      item.appendChild(top);
+
+      if (s.why) {
+        var why = doc().createElement('div');
+        why.className = 's-why';
+        why.textContent = s.why;
+        item.appendChild(why);
+      }
+
+      var diff = doc().createElement('div');
+      diff.className = 'c-diff';
+      diffInto(diff, s.basis.join(''), s.after.join(''));
+      item.appendChild(diff);
+
+      if (stale) {
+        var warn = doc().createElement('div');
+        warn.className = 's-stale';
+        warn.textContent = 'This paragraph has changed since the suggestion was made, so it cannot be applied.';
+        item.appendChild(warn);
+      }
+
+      var actions = doc().createElement('div');
+      actions.className = 'r-tools';
+      var accept = doc().createElement('button');
+      accept.className = 'pill primary';
+      accept.textContent = 'Accept';
+      accept.disabled = stale;
+      accept.addEventListener('click', function () {
+        if (acceptSuggestion(s)) flash('Applied — Ctrl/Cmd+Z undoes it');
+      });
+      var dismiss = doc().createElement('button');
+      dismiss.className = 'pill';
+      dismiss.textContent = 'Dismiss';
+      dismiss.addEventListener('click', function () { dismissSuggestion(s); });
+      actions.appendChild(accept);
+      actions.appendChild(dismiss);
+      item.appendChild(actions);
+
+      box.appendChild(item);
+    });
+  }
+
+  // The host says its AI settings changed: a key added in another tab, say.
+  function aiSettingsChanged() {
+    return refreshAIStatus();
   }
 
 
@@ -2858,7 +3596,13 @@
       refresh();
       if (!state.regions.length) flash('No editable text found in this file');
     } else {
+      setPaused(false);
       state.active = false;
+      // Suggestions belong to the paragraphs on screen in this session of
+      // editing; anything still on its way back is no longer wanted.
+      if (state.aiJob) state.aiJob.cancelled = true;
+      state.aiJob = null;
+      state.suggestions = [];
       doc().documentElement.removeAttribute(MODE_ATTR);
       removeListeners();
       teardownRegions();
@@ -2872,6 +3616,69 @@
 
     send({ type: 'vibeRevise:state', active: state.active, unsaved: unsavedCount() });
     return state.active;
+  }
+
+  /*
+   * Pause: edit mode stays on, but the page goes back to being a page.
+   *
+   * Inside an editable run the browser keeps a drag-selection within that one
+   * run, so copying a sentence that crosses a link, or a whole table, is not
+   * possible while editing. Pausing takes `contenteditable` off every run and
+   * stops the editing listeners, so selection and copy behave as they would
+   * without VibeRevise.
+   *
+   * Nothing is torn down. The wrappers, the edits, undo history and comments
+   * all stay exactly where they are, so Resume is instant and loses nothing.
+   * Links and forms are still held back, because the edits are still unsaved.
+   */
+  var PAUSED_LISTENERS = [
+    ['click', onClick, true],
+    ['submit', onSubmit, true],
+  ];
+
+  function setPaused(next) {
+    next = !!next && state.active;
+    if (next === state.paused) return state.paused;
+    state.paused = next;
+
+    state.regions.forEach(function (r) {
+      if (r.removed) return;
+      if (next) r.island.removeAttribute('contenteditable');
+      else r.island.setAttribute('contenteditable', 'true');
+    });
+
+    if (next) {
+      setMenuOpen(false);
+      setMoreOpen(false);
+      setAIOpen(false);
+      hideAdd();
+      closeRail();
+      removeAssist();
+      removeListeners();
+      PAUSED_LISTENERS.forEach(function (l) { doc().addEventListener(l[0], l[1], l[2]); });
+      doc().documentElement.removeAttribute(MODE_ATTR);
+      var active = doc().activeElement;
+      if (active && active.blur && state.byIsland.get(active)) active.blur();
+    } else {
+      PAUSED_LISTENERS.forEach(function (l) { doc().removeEventListener(l[0], l[1], l[2]); });
+      if (state.active) {
+        doc().documentElement.setAttribute(MODE_ATTR, 'on');
+        addListeners();
+        renderRail();
+      }
+    }
+
+    if (state.ui) {
+      state.ui.bar.classList.toggle('paused', next);
+      state.ui.label.textContent = next ? 'Paused' : 'Edit mode';
+      state.ui.pause.textContent = next ? 'Resume editing' : 'Pause';
+      state.ui.pause.classList.toggle('primary', next);
+      state.ui.pause.title = next ? 'Go back to editing'
+                                  : 'Stop editing for now, so you can select and copy text';
+      flash(next ? 'Select and copy as normal. Your edits are kept.' : '');
+    }
+    refresh();
+    return state.paused;
   }
 
   function init(options) {
@@ -2895,6 +3702,12 @@
     // which of those it did; the extension supplies nothing and keeps the
     // server/download path below.
     state.saveFile = options.saveFile || null;
+    // AI, offered by the host or not at all. The editor builds the prompts and
+    // shows the answers; the host holds the key and makes the request, so the
+    // key never has to be anywhere the document can see.
+    state.ai = (options.ai && AI) ? options.ai : null;
+    state.aiStatus = null;
+    if (state.ai) refreshAIStatus();
     // Only the test suite passes this. See fromUser().
     state.trustSynthetic = options.trustSynthetic === true;
     state.win = state.doc ? state.doc.defaultView : null;
@@ -2917,6 +3730,7 @@
     }
     return {
       active: state.active,
+      paused: state.paused,
       regions: state.regions.length,
       changed: changedCount(),
       unsaved: unsavedCount(),
@@ -2950,9 +3764,28 @@
     removeComment: removeComment,
     commentRegions: liveComments,
     setActive: setActive,
+    setPaused: setPaused,
     // Exposed for the suite: the list of changes is built from this.
     diffWords: diffWords,
     setCommentsVisible: setCommentsVisible,
+    // AI. Exposed so the hosts can say settings changed, and so the suite can
+    // drive suggestions without clicking through a closed shadow root.
+    aiRewrite: function (instruction, block) {
+      var target = null;
+      if (block) {
+        target = { block: block, regions: runsOf(block) };
+        if (!target.regions.length) target = null;
+      }
+      return aiRewrite(target, instruction);
+    },
+    aiProofread: aiProofread,
+    aiReplyTo: aiReplyTo,
+    aiSettingsChanged: aiSettingsChanged,
+    suggestions: function () { return state.suggestions.slice(); },
+    acceptSuggestion: acceptSuggestion,
+    dismissSuggestion: dismissSuggestion,
+    acceptAllSuggestions: acceptAll,
+    isSuggestionStale: isStale,
     commentsVisible: function () { return state.commentsVisible; },
     isActive: function () { return state.active; },
     status: status,

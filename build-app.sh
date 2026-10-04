@@ -37,6 +37,7 @@ cp "$DIR/packages/html-splice/src/tokenizer.js" \
    "$DIR/src/lib/structures.js" \
    "$DIR/src/lib/comments.js" \
    "$DIR/src/lib/prompt.js" \
+   "$DIR/src/lib/ai.js" \
    "$DIR/src/editor.js" \
    "$OUT/lib/"
 

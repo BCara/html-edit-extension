@@ -21,7 +21,7 @@ const m = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, ''));
  * which has no importScripts(), so its dependency is listed here instead and
  * loaded in order. background.js tolerates both.
  */
-m.background = { scripts: ['src/lib/origins.js', 'src/background.js'] };
+m.background = { scripts: ['src/lib/origins.js', 'src/lib/ai.js', 'src/background.js'] };
 
 /*
  * AMO requires a stable extension id. Without one every upload looks like a

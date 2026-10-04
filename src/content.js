@@ -24,11 +24,11 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.13.0';
+  var VERSION = '0.14.0';
   var REQUIRED = [
     'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
     'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',
-    'VibeReviseComments', 'VibeRevisePrompt', 'VibeReviseEditor',
+    'VibeReviseComments', 'VibeRevisePrompt', 'VibeReviseAI', 'VibeReviseEditor',
   ];
 
   function missingModules() {
@@ -107,10 +107,25 @@
     },
   };
 
-  // A name changed in the popup reaches a page that is already open.
+  /*
+   * AI, through the service worker. This script never sees the key: it asks
+   * whether AI is set up, sends the prompt the editor built, and gets back the
+   * answer. The settings page is the extension's options page, because only an
+   * extension page may ask Chrome for permission to reach the provider.
+   */
+  var AI_HOST = {
+    status: function () { return send({ type: 'vibeRevise:aiStatus' }); },
+    complete: function (request) { return send({ type: 'vibeRevise:aiComplete', request: request }); },
+    openSettings: function () { send({ type: 'vibeRevise:openOptions' }); },
+  };
+
+  // A name changed in the popup reaches a page that is already open, and so
+  // does a key added on the settings page.
   if (chrome.storage && chrome.storage.onChanged) {
     chrome.storage.onChanged.addListener(function (changes, area) {
-      if (area !== 'local' || !changes.author || !state.ready) return;
+      if (area !== 'local' || !state.ready) return;
+      if (changes.ai) Editor.aiSettingsChanged();
+      if (!changes.author) return;
       var next = changes.author.newValue || '';
       if (Editor.status().author !== next) Editor.setAuthor(next);
     });
@@ -483,6 +498,7 @@
         Editor.init({
           source: source, map: map, filename: filename(), served: state.served,
           settings: SETTINGS,
+          ai: AI_HOST,
           // Non-null whenever this browser can write a file at all: Save then
           // writes over the top of the file rather than downloading a copy,
           // asking once for somewhere to write if it does not already know.

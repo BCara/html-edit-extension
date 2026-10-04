@@ -377,3 +377,8 @@ body {
 .settings #set-status.good { color: #15803d; }
 .settings #set-status.bad { color: var(--warn); }
 .settings-actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.settings-body { max-height: calc(100dvh - 48px); overflow: auto; }
+.settings .set-section {
+  margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line);
+  font-size: 15px;
+}

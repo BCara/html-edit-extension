@@ -17,7 +17,7 @@
 
 // Bump this to retire the previous cache. It is the app's shell version, not
 // the extension's.
-const CACHE = 'viberevise-shell-v2';
+const CACHE = 'viberevise-shell-v4';
 
 const SHELL = [
   'index.html',
@@ -33,6 +33,7 @@ const SHELL = [
   '../src/lib/structures.js',
   '../src/lib/comments.js',
   '../src/lib/prompt.js',
+  '../src/lib/ai.js',
   '../src/editor.js',
   '../icons/icon192.png',
   '../icons/icon512.png',
@@ -65,6 +66,8 @@ self.addEventListener('activate', (event) => {
  */
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+  // AI requests are POSTs to the user's provider, so they pass straight
+  // through: never cached, never touched.
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);

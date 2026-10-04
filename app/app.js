@@ -91,6 +91,56 @@ var SETTINGS = {
 
 var RECENTS_MAX = 6;
 
+// --- AI, with your own key -----------------------------------------------------
+
+/*
+ * The app has no background worker to hide a key in, so it makes the request
+ * itself, straight from this page to the provider. The key is kept in this
+ * origin's storage and nowhere else; the document being edited cannot read it,
+ * because its frame is sandboxed without scripts (see the top of this file).
+ */
+var AI = window.VibeReviseAI;
+var AI_KEY = 'viberevise:ai';
+
+function readAIConfig() {
+  try {
+    var raw = localStorage.getItem(AI_KEY);
+    return raw ? AI.normaliseConfig(JSON.parse(raw)) : null;
+  } catch (e) { return null; }
+}
+
+function writeAIConfig(cfg) {
+  try {
+    if (cfg) {
+      localStorage.setItem(AI_KEY, JSON.stringify({
+        provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: cfg.apiKey,
+      }));
+    } else {
+      localStorage.removeItem(AI_KEY);
+    }
+    return true;
+  } catch (e) { return false; }    // a private window may refuse
+}
+
+// Handed to the editor as options.ai.
+var AI_HOST = {
+  status: function () {
+    var cfg = readAIConfig();
+    if (!cfg) return Promise.resolve({ configured: false, problem: 'Not set up yet.' });
+    var problem = AI.configProblem(cfg);
+    var host = '';
+    try { host = new URL(cfg.baseUrl).host; } catch (e) { /* reported by problem */ }
+    return Promise.resolve(problem ? { configured: false, problem: problem, host: host }
+                                   : { configured: true, label: AI.describe(cfg), host: host });
+  },
+  complete: function (request) {
+    var cfg = readAIConfig();
+    if (!cfg) return Promise.resolve({ ok: false, message: 'AI is not set up.' });
+    return AI.complete(cfg, request, function (url, init) { return fetch(url, init); });
+  },
+  openSettings: function () { openSettings(true); },
+};
+
 // --- chrome ------------------------------------------------------------------
 
 var toastTimer = 0;
@@ -239,6 +289,7 @@ async function load(source, name, handle) {
     filename: current.name,
     saveFile: saveFile,
     settings: SETTINGS,
+    ai: AI ? AI_HOST : null,
   });
   window.VibeReviseEditor.setActive(true);
 
@@ -621,12 +672,67 @@ function acceptLaunchedFile() {
 
 // --- the settings dialog ----------------------------------------------------------
 
-function openSettings() {
+function openSettings(toAI) {
   var dlg = document.getElementById('settings');
   document.getElementById('set-author').value = readStore(STORE.author);
+  fillAIForm(readAIConfig());
   settingsStatus('');
   if (typeof dlg.showModal === 'function') dlg.showModal();
   else dlg.setAttribute('open', '');
+  if (toAI === true) {
+    document.getElementById('ai-section').scrollIntoView({ block: 'start' });
+    document.getElementById(readAIConfig() ? 'set-ai-model' : 'set-ai-key').focus();
+  }
+}
+
+var aiEls = {
+  provider: document.getElementById('set-ai-provider'),
+  url: document.getElementById('set-ai-url'),
+  model: document.getElementById('set-ai-model'),
+  key: document.getElementById('set-ai-key'),
+  hint: document.getElementById('set-ai-hint'),
+};
+var aiLastProvider = 'anthropic';
+
+/*
+ * Switching provider fills in its address and default model, but only over
+ * the previous provider's defaults — never over something the user typed.
+ */
+function applyAIPreset(next) {
+  var was = AI.PROVIDERS[aiLastProvider];
+  var now = AI.PROVIDERS[next];
+  if (!aiEls.url.value.trim() || aiEls.url.value.trim() === was.baseUrl) aiEls.url.value = now.baseUrl;
+  if (!aiEls.model.value.trim() || aiEls.model.value.trim() === was.model) aiEls.model.value = now.model;
+  aiEls.hint.textContent = now.keyHint || '';
+  aiEls.key.placeholder = now.keyRequired ? 'Paste your key' : 'Optional for a local server';
+  aiLastProvider = next;
+}
+
+function fillAIForm(cfg) {
+  if (!AI) return;
+  cfg = cfg || AI.normaliseConfig({ provider: 'anthropic' });
+  aiEls.provider.value = cfg.provider;
+  aiLastProvider = cfg.provider;
+  aiEls.url.value = cfg.baseUrl;
+  aiEls.model.value = cfg.model;
+  aiEls.key.value = cfg.apiKey;
+  applyAIPreset(cfg.provider);
+}
+
+function readAIForm() {
+  return AI.normaliseConfig({
+    provider: aiEls.provider.value, baseUrl: aiEls.url.value,
+    model: aiEls.model.value, apiKey: aiEls.key.value,
+  });
+}
+
+// Something worth saving: a key, or a keyless local server with a model.
+function aiFormInUse(cfg) {
+  return !!(cfg.apiKey || (cfg.provider === 'custom' && cfg.baseUrl && cfg.model));
+}
+
+function tellEditorAI() {
+  if (window.VibeReviseEditor && current.source) window.VibeReviseEditor.aiSettingsChanged();
 }
 
 function settingsStatus(text, tone) {
@@ -637,7 +743,38 @@ function settingsStatus(text, tone) {
 
 (function wireSettings() {
   var dlg = document.getElementById('settings');
-  document.getElementById('settings-open').addEventListener('click', openSettings);
+  document.getElementById('settings-open').addEventListener('click', function () { openSettings(); });
+
+  if (AI) {
+    Object.keys(AI.PROVIDERS).forEach(function (id) {
+      var opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = AI.PROVIDERS[id].label;
+      aiEls.provider.appendChild(opt);
+    });
+    aiEls.provider.addEventListener('change', function () { applyAIPreset(aiEls.provider.value); });
+
+    // Tests what is in the form, saved or not, so a typo is found before Save.
+    document.getElementById('set-ai-test').addEventListener('click', function () {
+      var cfg = readAIForm();
+      var problem = AI.configProblem(cfg);
+      if (problem) { settingsStatus(problem, 'bad'); return; }
+      settingsStatus('Asking ' + AI.describe(cfg) + ' for a one-word answer\u2026');
+      AI.complete(cfg, AI.pingRequest(), function (url, init) { return fetch(url, init); })
+        .then(function (res) {
+          if (res.ok) settingsStatus('It works \u2014 ' + AI.describe(cfg) + ' answered. Press Save to keep it.', 'good');
+          else settingsStatus(res.message, 'bad');
+        });
+    });
+    document.getElementById('set-ai-forget').addEventListener('click', function () {
+      writeAIConfig(null);
+      fillAIForm(null);
+      tellEditorAI();
+      settingsStatus('Forgotten. The key is gone from this browser.', 'good');
+    });
+  } else {
+    document.getElementById('ai-section').hidden = true;
+  }
   document.getElementById('set-cancel').addEventListener('click', function () { dlg.close(); });
 
   document.getElementById('settings-form').addEventListener('submit', function () {
@@ -645,7 +782,22 @@ function settingsStatus(text, tone) {
     writeStore(STORE.author, name);
     // An open document picks the name up straight away.
     if (window.VibeReviseEditor && current.source) window.VibeReviseEditor.setAuthor(name);
-    toast('Saved.');
+
+    var message = 'Saved.';
+    if (AI) {
+      var cfg = readAIForm();
+      if (aiFormInUse(cfg)) {
+        writeAIConfig(cfg);
+        var problem = AI.configProblem(cfg);
+        message = problem ? 'Saved, but AI is not ready yet: ' + problem
+                          : 'Saved. AI suggestions use ' + AI.describe(cfg) + '.';
+      } else if (readAIConfig()) {
+        writeAIConfig(null);        // the key field was cleared: that is "off"
+        message = 'Saved. AI is off.';
+      }
+      tellEditorAI();
+    }
+    toast(message);
   });
 })();
 
@@ -663,4 +815,7 @@ window.__vibeReviseApp = {
   settings: SETTINGS,
   current: current,
   canHandle: CAN_HANDLE,
+  ai: AI_HOST,
+  readAIConfig: readAIConfig,
+  writeAIConfig: writeAIConfig,
 };

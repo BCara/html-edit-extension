@@ -115,3 +115,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 .settings #author-status.good { color: #15803d; }
 .settings #author-status.bad { color: var(--warn); }
 @media (prefers-color-scheme: dark) { .settings #author-status.good { color: #86efac; } }
+
+/* ---- AI ----------------------------------------------------------------- */
+.ai-row {
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  border-top: 1px solid var(--line); padding-top: 9px; margin-bottom: 4px;
+  color: var(--muted); font-size: 12px;
+}
+.ai-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-row button { flex: none; padding: 4px 10px; font-size: 12px; }

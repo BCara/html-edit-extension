@@ -18,6 +18,12 @@
  * It holds no document state. The content script owns the source string and the
  * offset map, and the file text passes through here only on its way into a save
  * the user asked for — it is never stored, and never sent anywhere else.
+ *
+ * AI, when the user has added a key, is the one exception to "sends nothing
+ * anywhere", and it is made here rather than in the page for a reason: the key
+ * lives in extension storage and never leaves this worker. The content script
+ * sends the prompt it built; this adds the key, makes the request to the one
+ * address the user chose and was granted, and hands back only the answer.
  */
 
 /*
@@ -29,8 +35,9 @@
  * function does not exist and the manifest lists origins.js ahead of this file
  * instead. Both end up with the same global, so everything below is identical.
  */
-if (typeof importScripts === 'function') importScripts('/src/lib/origins.js');
+if (typeof importScripts === 'function') importScripts('/src/lib/origins.js', '/src/lib/ai.js');
 const Origins = self.VibeReviseOrigins;
+const AI = self.VibeReviseAI;
 
 // Order matters: each library defines globals the next file uses.
 const INJECT_FILES = [
@@ -43,6 +50,7 @@ const INJECT_FILES = [
   'src/lib/structures.js',
   'src/lib/comments.js',
   'src/lib/prompt.js',
+  'src/lib/ai.js',
   'src/editor.js',
   'src/content.js',
 ];
@@ -76,6 +84,14 @@ async function activeLocalTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) throw new Error('No active tab.');
 
+  /*
+   * No URL at all is not "neither local nor LAN". Chrome withholds a file://
+   * tab's URL from activeTab while "Allow access to file URLs" is off, so a
+   * local document — including one on a network share, file://host/... —
+   * arrives here looking like nothing. Say what is actually wrong.
+   */
+  if (!tab.url && !(await fileSchemeAllowed())) return { tab, code: 'no-file-access' };
+
   const verdict = classify(tab.url);
   if (!verdict.kind) return { tab, code: 'not-editable', reason: verdict.reason };
 
@@ -85,12 +101,17 @@ async function activeLocalTab() {
    * "cannot ask" is treated as "not blocked" rather than as a refusal — the
    * read still falls back to asking the user to pick the file if it fails.
    */
-  if (verdict.kind === 'file' && typeof chrome.extension !== 'undefined'
-      && typeof chrome.extension.isAllowedFileSchemeAccess === 'function'
-      && !(await chrome.extension.isAllowedFileSchemeAccess())) {
+  if (verdict.kind === 'file' && !(await fileSchemeAllowed())) {
     return { tab, code: 'no-file-access' };
   }
   return { tab, kind: verdict.kind };
+}
+
+// Firefox cannot be asked, and "cannot ask" counts as allowed — see above.
+async function fileSchemeAllowed() {
+  if (typeof chrome.extension === 'undefined'
+      || typeof chrome.extension.isAllowedFileSchemeAccess !== 'function') return true;
+  return chrome.extension.isAllowedFileSchemeAccess();
 }
 
 // Relay a request from the popup to the content script, injecting it first.
@@ -126,6 +147,54 @@ async function readFile(url) {
   } catch (err) {
     return { ok: false, code: 'fetch-failed', message: String(err && err.message || err) };
   }
+}
+
+/*
+ * AI settings: { provider, baseUrl, model, apiKey } under one storage key.
+ * Kept in chrome.storage.local — this browser profile on this device, never
+ * synced — and read only here and on the settings page.
+ */
+async function aiConfig() {
+  const o = await chrome.storage.local.get('ai');
+  return o.ai ? AI.normaliseConfig(o.ai) : null;
+}
+
+/*
+ * Whether AI can be used right now, and what to call it. Never the key.
+ *
+ * Granted host access is part of "configured": a key for an address Chrome has
+ * not been told VibeRevise may reach would fail on every request, and saying
+ * so up front beats a network error later.
+ */
+async function aiStatus() {
+  const cfg = await aiConfig();
+  if (!cfg) return { configured: false, problem: 'Not set up yet.' };
+  const problem = AI.configProblem(cfg);
+  if (problem) return { configured: false, problem };
+  const pattern = AI.permissionPattern(cfg);
+  const granted = await chrome.permissions.contains({ origins: [pattern] });
+  const host = new URL(cfg.baseUrl).host;
+  if (!granted) {
+    return { configured: false, host, problem: 'VibeRevise has not been allowed to reach ' + host +
+             ' yet. Open AI settings and press Save to allow it.' };
+  }
+  return { configured: true, label: AI.describe(cfg), host };
+}
+
+async function aiComplete(request) {
+  const status = await aiStatus();
+  if (!status.configured) return { ok: false, message: status.problem };
+  if (!request || typeof request.system !== 'string' || typeof request.user !== 'string') {
+    return { ok: false, message: 'That was not a request VibeRevise knows how to send.' };
+  }
+  // Only the fields a prompt has. Whatever else arrives is not forwarded.
+  const req = {
+    system: request.system,
+    user: request.user,
+    schema: request.schema || null,
+    maxTokens: Math.min(Math.max(+request.maxTokens || 8000, 16), 32000),
+  };
+  return AI.complete(await aiConfig(), req, (url, init) => fetch(url, init));
 }
 
 function setBadge(tabId, active, unsaved) {
@@ -212,6 +281,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     })();
     return true;
+  }
+
+  /*
+   * AI. Only ever from VibeRevise itself: a page cannot reach this listener
+   * (there is no externally_connectable), so no website can spend the user's
+   * key or read the answers.
+   */
+  if (msg.type === 'vibeRevise:aiStatus') {
+    aiStatus().then(sendResponse, (err) => sendResponse({ configured: false, problem: String(err && err.message || err) }));
+    return true;
+  }
+
+  if (msg.type === 'vibeRevise:aiComplete') {
+    if (sender.id !== chrome.runtime.id) { sendResponse({ ok: false, message: 'Not allowed.' }); return; }
+    aiComplete(msg.request).then(sendResponse, (err) => sendResponse({ ok: false, message: String(err && err.message || err) }));
+    return true;
+  }
+
+  if (msg.type === 'vibeRevise:openOptions') {
+    chrome.runtime.openOptionsPage();
+    sendResponse({ ok: true });
+    return;
   }
 
   if (msg.type === 'vibeRevise:openExtensionsPage') {

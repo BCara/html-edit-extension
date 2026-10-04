@@ -84,9 +84,11 @@ You can change words, add another block like one that is already there, and atta
 
 PRIVACY
 
-VibeRevise sends your documents nowhere. It talks to the server your own document came from, to read it and, if you ask, save it back. Nothing else ever leaves your browser: no analytics, no accounts, no AI, no servers of ours.
+VibeRevise has no servers and collects nothing: no analytics, no accounts. It talks to the server your own document came from, to read it and, if you ask, save it back.
 
-It stores two things, in your browser only: the name you typed, and — if you add one — your API key and chosen model. Your key is never visible to the pages you edit.
+AI is optional and off by default. Add an API key for Claude, OpenAI, OpenRouter, Gemini, or a model on your own computer, and you can ask for a rewrite, a proofread or a reply to a comment. Only then, and only when you press the button, are the words of those paragraphs sent, straight to the service you chose. Every answer is a suggestion you accept or dismiss. The markup is never touched.
+
+It stores your name, your comments setting and, if you add them, your AI provider, model and key, all in your browser only. Your key is never visible to the pages you edit.
 ```
 
 ## Permission justifications
@@ -111,7 +113,12 @@ Chrome cannot write back to a file:// path, so saving an edited local file is pe
 
 **storage**
 ```
-Stores, in the user's own browser profile, the name they type to sign their comments and whether comments are rendered visibly in saved documents. Nothing about any document is stored.
+Stores, in the user's own browser profile, the name they type to sign their comments, whether comments are rendered visibly in saved documents, and — only if the user adds them — their AI provider, address, model and API key. Nothing about any document is stored.
+```
+
+**https://\*/\* and http://\*/\* (optional host permissions)**
+```
+Used only for the optional AI feature, which is off until the user adds their own API key for an AI service they choose (Anthropic, OpenAI, OpenRouter, Google Gemini, or any compatible address, including a model running on their own computer). Nothing is granted at install. When the user saves their AI settings, the settings page requests access to the single host they typed — for example https://api.anthropic.com/* — and Chrome's own prompt names it. The background service worker then sends that host only the text the user asks it to work on, only when they press a button. Changing the address or removing the key revokes the permission. The patterns are broad only because the address is the user's choice.
 ```
 
 **file:///\* (optional host permission)**
@@ -129,9 +136,24 @@ Editing the visible text of an HTML document in the browser and saving it withou
 Declare it accurately — an inaccurate data
 disclosure is a common reason for rejection.
 
-Tick nothing. VibeRevise collects no user data: there is no analytics, no
-tracking, no account and no network request of its own. The name the user
-types is stored locally and written only into documents they save themselves.
+With AI in the extension, "tick nothing" is no longer accurate. When the
+user turns AI on, text from the page goes to a third party (the AI provider
+they chose), and so does their key, as the credential for that provider. The
+Web Store counts data sent off the device as handled, even when it goes to a
+service the user picked and never to the developer. Tick:
+
+- **Website content.** The text of the paragraphs the user asks AI to work on.
+- **Authentication information.** The user's own API key, sent only to the
+  provider it belongs to.
+
+Then explain in the justification box: off by default; sent only on an
+explicit button press; only to the provider the user configured; nothing to
+the developer, who runs no servers. This is my reading of the form. Check the
+current wording when you submit, because it changes.
+
+Nothing else is collected: there is no analytics, no tracking and no account.
+The name the user types is stored locally and written only into documents they
+save themselves.
 
 Certify all three: data is not sold to third parties; not used or transferred
 for purposes unrelated to the single purpose; not used to determine

@@ -56,6 +56,16 @@ failing silently.
 4. Press **Save** in the bar at the bottom right. The OS Save dialog opens with
    the original filename.
 
+### Pausing to copy
+
+While you are editing, the browser keeps a drag-selection inside the one run
+of text it started in, so copying a whole table or a sentence that crosses a
+link does not work. Press **Pause** in the bar: the page goes back to behaving
+like an ordinary page, so you can select and copy anything, and your edits,
+undo history and comments all stay put. **Resume editing** carries on where you
+left off. Links still do not navigate while paused, because the edits are still
+unsaved.
+
 ### Adding a block
 
 You can add another one of something: another paragraph after a paragraph,
@@ -157,6 +167,78 @@ the `×` on its card; a comment left empty is not written at all.
 | `Enter` | Line break, or a new block at the end of one |
 | `Ctrl`/`Cmd` + `Enter` | New block |
 
+### AI suggestions, with your own key
+
+Off until you add a key. VibeRevise has no AI service of its own and never
+sends anything to one: you bring an API key for a service you already use, and
+the request goes from your browser straight to it.
+
+| Provider | Address | Model |
+| --- | --- | --- |
+| Anthropic (Claude) | `https://api.anthropic.com` | `claude-opus-5-5` by default |
+| OpenAI | `https://api.openai.com/v1` | whichever you name |
+| OpenRouter | `https://openrouter.ai/api/v1` | whichever you name, e.g. `vendor/model` |
+| Google Gemini | its OpenAI-compatible endpoint | whichever you name |
+| Anything else | any address that speaks the OpenAI chat-completions format | whichever it serves |
+
+"Anything else" includes a model on your own computer: Ollama
+(`http://localhost:11434/v1`), LM Studio (`http://localhost:1234/v1`), or a
+server on your network. Plain `http://` is accepted only for local and private
+addresses, because a key sent over http to the open internet can be read by
+anyone in between. Claude is spoken in Anthropic's own Messages format, not
+through a compatibility layer.
+
+Set it up from **AI settings**: the popup's button, or **Settings** in the
+editor's ✦ AI panel. In the extension that opens its own settings page. Saving
+asks Chrome to let VibeRevise reach **that one address and no other**, with
+Chrome's own prompt naming it. In the web app it is a section of the Settings
+dialog.
+
+Then, from the **✦ AI** button on the status bar:
+
+- **Rewrite the paragraph you are in.** Pick *Tighten*, *Fix grammar*,
+  *Plainer* or *More formal*, or type your own instruction.
+- **Proofread the whole document.** Spelling, grammar, punctuation and typos
+  only, sent a batch of paragraphs at a time. Correct text is left alone, and
+  so is the document's own spelling convention.
+- **Ask AI** on a comment card drafts a reply to the thread, signed
+  `Your name (AI draft)` so nobody mistakes it for something you wrote. If the
+  thread asks for a change to the passage, the change comes too, as a
+  suggestion.
+
+Every answer is a **suggestion**. It shows as a before-and-after of the
+paragraph with **Accept** and **Dismiss**, and nothing changes until you accept.
+Accepting is a single undo step, and the list of changes marks it *AI
+suggested*. A suggestion goes stale if you edit that paragraph before
+accepting it, and a stale one cannot be applied: putting an answer onto words
+the model never saw would be guessing.
+
+**The one rule still holds.** A paragraph is sent as its runs of text, split
+wherever the formatting is, and the answer has to come back as the same number
+of runs. Bold stays bold and links stay links, because the answer only lands in
+the places you could have typed into. If a model merges the runs, VibeRevise
+refuses the answer instead of rewriting markup to fit it.
+
+**What is sent, and when.** Only when you press a button. Only the words of the
+paragraphs involved: never the file and never its markup. A rewrite also sends
+up to 400 characters of the text either side, for context, and Ask AI sends the
+comment thread. The document's text goes as JSON data, under instructions that
+treat it as text to edit, never as instructions. A page that tries to talk to
+the model can only change what is suggested, and you see the suggestion before
+anything happens.
+
+**Where the key lives.** In the extension it is kept in `chrome.storage.local`.
+That means this browser profile, never synced. It is read only by the
+settings page and the background worker that makes the request, and the pages
+you edit never see it. In the web app it is kept in that site's
+`localStorage`. The document you are editing sits in a frame sandboxed without
+scripts, so it cannot read the key either. **Forget key** removes the key and,
+in the extension, Chrome's permission for that address.
+
+The service has to accept requests from a browser. Anthropic, OpenAI,
+OpenRouter and Gemini do. For Ollama, set `OLLAMA_ORIGINS=*` (or the specific
+origin) before starting it.
+
 ### Marking up a page on the web
 
 VibeRevise also works on an ordinary website, with one difference that is not
@@ -230,10 +312,13 @@ would throw away every unsaved edit.
 | — | **Nothing at all is requested for http or https.** A content script's `fetch` carries the page's origin, so re-reading the document it is running on, and `PUT`ting it back, are ordinary same-origin requests. `activeTab` covers the injection and that is the whole story. |
 | `storage` | The name you type, and whether comments are shown in the document. In your browser profile. Nothing about any document. |
 | `file:///*` — **optional** | Lets the service worker open the file itself. Not granted at install: the popup asks for it on a button press, Chrome shows its own consent prompt, and declining costs you one click per file instead. |
+| `https://*/*`, `http://*/*` — **optional, AI only** | Lets the background worker reach the AI provider you chose. Nothing is granted at install. The AI settings page asks for **the one host you typed**, at the moment you press Save, and Chrome's prompt names it. Changing the address or forgetting the key takes that permission back. They are listed this broadly only because the address is yours to choose. |
+| `options_ui` | The AI settings page. It is an extension page because only an extension page can ask for host permission, and so you never type your key into a document VibeRevise was injected into. |
 
-There is no required `host_permissions`, no `storage`, and no network access of
-any kind. VibeRevise makes no requests, contains no AI, and sends your document
-nowhere.
+There is no required `host_permissions`. Until you add an AI key there is no
+network access of any kind: VibeRevise makes no requests and sends your
+document nowhere. With a key, the only requests are the ones you ask for, to
+the address you chose. See [AI suggestions](#ai-suggestions-with-your-own-key).
 
 ### Why reading a local file is awkward
 
@@ -330,6 +415,14 @@ offset.
 - **Editing is per run of text.** Each run between tags is its own field, so the
   caret does not travel from `Hello` into `<strong>bold</strong>` — click or
   `Tab` into the next one. This is what keeps the tags safe.
+- **AI cannot move formatting.** For the same reason, a rewrite that would need
+  a bold phrase to grow, shrink across a word, or move is refused, not
+  applied. Narrower instructions usually get an answer that fits.
+- **AI suggestions are not kept.** They belong to the edit-mode session they
+  were asked for in. Switching edit mode off clears any you have not accepted.
+- **No streaming.** A long proofread shows its progress batch by batch rather
+  than word by word, and Cancel stops waiting for it. A request already sent
+  still reaches the provider, and may still be billed.
 
 **Consequences of how the parser works**
 
@@ -378,7 +471,7 @@ Save dialog.
 
 ```
 manifest.json           permissions, with the justification for each
-src/background.js       service worker: injection, downloads, toolbar badge
+src/background.js       service worker: injection, downloads, badge, AI requests
 src/content.js          reads the source, builds the map, routes messages
 src/editor.js           edit mode: constraints, history, status bar, saving
 src/lib/origins.js      which documents VibeRevise will touch, and why
@@ -388,6 +481,8 @@ src/lib/islands.js      the contenteditable wrappers and their values
 src/lib/blocks.js       where an added block goes, and what it looks like
 src/lib/comments.js     reading and writing notes as HTML comments
 src/lib/prompt.js       the in-page card that asks you to choose the file
+src/lib/ai.js           AI with your own key: providers, prompts, applying answers
+src/options/            AI settings: provider, model, key, host permission
 packages/html-splice/   the engine, as a standalone package
   src/tokenizer.js      source text -> character ranges
   src/splice.js         escaping and offset splicing

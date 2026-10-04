@@ -113,6 +113,27 @@ async function run() {
     eq(await app.settings.get('commentsVisible'), false, 'and remembered when it is off');
   }
 
+  heading('AI with your own key');
+  {
+    const st0 = await app.ai.status();
+    ok(!st0.configured, 'off until a key is added');
+
+    app.writeAIConfig({ provider: 'anthropic', apiKey: 'sk-ant-test-key' });
+    const st = await app.ai.status();
+    ok(st.configured, 'a key turns it on');
+    eq(st.host, 'api.anthropic.com', 'and says where text would go');
+    ok(JSON.stringify(st).indexOf('sk-ant') === -1, 'the status the editor sees never carries the key');
+    eq(app.readAIConfig().model, 'claude-opus-5-5', 'the default model is filled in');
+
+    app.writeAIConfig({ provider: 'custom', baseUrl: 'http://api.example.com/v1', model: 'm', apiKey: 'k' });
+    const bad = await app.ai.status();
+    ok(!bad.configured && /unencrypted/.test(bad.problem), 'a key over plain http to the internet is refused');
+
+    app.writeAIConfig(null);
+    ok(!(await app.ai.status()).configured, 'forgetting the key turns it off again');
+    ok(!W.document.getElementById('ai-section').hidden, 'the settings dialog offers it');
+  }
+
   heading('saving');
   {
     // No file handle in this environment, and no share sheet, so it must fall

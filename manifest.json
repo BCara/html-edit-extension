@@ -7,7 +7,7 @@
   // cannot work without it — see the justification on each one.
   "manifest_version": 3,
   "name": "VibeRevise",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Edit the visible text of an HTML document — local, or served from your own network — and save it without disturbing the markup.",
 
   "permissions": [
@@ -55,13 +55,32 @@
   // with a button and Chrome shows its own consent prompt. If it is refused, or
   // if the service worker cannot read file URLs at all, the extension falls
   // back to asking the user to choose the file — which needs no permission.
-  "optional_host_permissions": ["file:///*"],
+  //
+  // The http and https entries are for AI, and only for AI. They exist so the
+  // AI settings page can ask for the ONE address the user typed — their
+  // provider's API, or a model on their own machine — at the moment they press
+  // Save, with Chrome's own prompt naming that host. Nothing is granted at
+  // install, nothing wider than that one host is ever requested, and forgetting
+  // the key takes it back. They have to be listed this broadly because the
+  // address is the user's choice, not ours.
+  "optional_host_permissions": ["file:///*", "https://*/*", "http://*/*"],
 
-  // Network: none. VibeRevise sends nothing anywhere.
+  // Network: none, unless the user adds an AI key. Then, and only when they
+  // press a button asking for a suggestion, the background worker sends the
+  // words of the paragraphs involved to the address they chose. Nothing is
+  // ever sent to VibeRevise.
   //
   // Reading local files ALSO requires the user to tick "Allow access to file
   // URLs" on chrome://extensions. That is a separate, user-granted toggle, not
   // a manifest permission; the popup detects when it is off and explains it.
+
+  // AI settings: provider, model, key. An extension page because only an
+  // extension page may ask for host permission, and so the key is never typed
+  // into a document VibeRevise was injected into.
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
 
   "background": {
     "service_worker": "src/background.js"

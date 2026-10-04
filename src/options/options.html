@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en-AU">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VibeRevise — AI settings</title>
+<link rel="stylesheet" href="options.css">
+<main class="wrap">
+  <h1>AI settings</h1>
+  <p class="lede">VibeRevise can suggest rewrites, proofread a document and draft
+     replies to comments using an AI service you already have an account with.
+     It is <b>off until you add a key</b>, and it only ever sends anything when
+     you press a button asking for a suggestion.</p>
+
+  <form id="form" autocomplete="off">
+    <label for="provider">Provider</label>
+    <select id="provider"></select>
+
+    <label for="base-url">Address</label>
+    <input id="base-url" type="url" spellcheck="false" autocapitalize="off"
+           placeholder="https://…">
+    <p class="hint" id="base-hint">Leave as it is unless you use a proxy.</p>
+
+    <label for="model">Model</label>
+    <input id="model" spellcheck="false" autocapitalize="off"
+           placeholder="The model name from your provider’s documentation">
+
+    <label for="key">API key</label>
+    <div class="row">
+      <input id="key" type="password" spellcheck="false" autocapitalize="off"
+             autocomplete="off" placeholder="Paste your key">
+      <button type="button" id="show-key" aria-pressed="false">Show</button>
+    </div>
+    <p class="hint" id="key-hint"></p>
+
+    <div class="actions">
+      <button type="submit" class="primary" id="save">Save and allow</button>
+      <button type="button" id="test">Test saved settings</button>
+      <button type="button" id="forget">Forget key</button>
+    </div>
+    <p class="status" id="status" role="status"></p>
+  </form>
+
+  <section class="facts">
+    <h2>What happens to your text</h2>
+    <ul>
+      <li><b>Sent only when you ask.</b> Pressing a rewrite, Proofread or Ask AI
+          button sends the words of the paragraphs involved — plus, for a rewrite,
+          a little of the text either side for context, and for Ask AI the
+          comment thread — straight to the address above. Never the file or its
+          markup, and nothing goes to VibeRevise or anyone else.</li>
+      <li><b>Nothing changes until you accept.</b> Every answer is shown as a
+          suggestion beside the paragraph. Accepting it is one undo step, and the
+          list of changes marks it as AI-suggested.</li>
+      <li><b>Your key stays in this browser.</b> It is kept in this Chrome profile
+          on this device, is not synced, and is only read by VibeRevise’s own
+          background worker — never by the pages you edit. Anyone with access to
+          this browser profile could read it, as with any saved password.</li>
+      <li><b>One address at a time.</b> Saving asks Chrome to let VibeRevise
+          reach only the address above. Changing it or forgetting the key takes
+          that permission back.</li>
+      <li><b>What the provider does with it</b> is governed by your agreement
+          with them, not by VibeRevise. A local model keeps everything on your
+          own machine.</li>
+    </ul>
+  </section>
+</main>
+<script src="../lib/ai.js"></script>
+<script src="options.js"></script>
+</html>

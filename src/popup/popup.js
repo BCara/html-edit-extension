@@ -290,3 +290,21 @@ chrome.runtime.sendMessage({ type: 'vibeRevise:classifyActive' }, (info) => {
 
   load();
 })();
+
+
+/*
+ * AI: whether it is on, and the way to its settings. The key itself is only
+ * ever handled on the settings page and in the background worker.
+ */
+(function aiRow() {
+  const label = document.getElementById('ai-state');
+  chrome.runtime.sendMessage({ type: 'vibeRevise:aiStatus' }, (st) => {
+    if (chrome.runtime.lastError || !st) { label.textContent = 'AI: off'; return; }
+    label.textContent = st.configured ? 'AI: ' + st.label : 'AI: off — bring your own key';
+    label.title = label.textContent;
+  });
+  document.getElementById('ai-settings').addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+    window.close();
+  });
+})();

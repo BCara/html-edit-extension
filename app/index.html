@@ -24,7 +24,7 @@
   <div class="brand">Quick&nbsp;Edit</div>
   <div class="file" id="filename" hidden></div>
   <div class="spacer"></div>
-  <button id="settings-open" class="btn" title="Your name">Settings</button>
+  <button id="settings-open" class="btn" title="Your name and AI">Settings</button>
   <button id="open" class="btn">Open</button>
   <button id="save" class="btn primary" hidden disabled>Save</button>
 </header>
@@ -75,7 +75,8 @@
       <div>
         <dt>Nothing is uploaded</dt>
         <dd>Your document is opened and edited in this browser tab. It is not
-            sent anywhere, and it never leaves this device.</dd>
+            sent anywhere — unless you turn on AI with your own key, and then
+            only the paragraphs you ask about, to the service you chose.</dd>
       </div>
       <div>
         <dt id="save-story-title">Saving</dt>
@@ -98,14 +99,44 @@
 
 <dialog id="settings" class="settings" aria-labelledby="settings-title">
   <form method="dialog" class="settings-body" id="settings-form">
-    <h2 id="settings-title">Your name</h2>
+    <h2 id="settings-title">Settings</h2>
 
     <label for="set-author">Your name</label>
     <input id="set-author" maxlength="60" autocomplete="name"
            placeholder="So people can see who wrote what">
     <p class="hint">Signs your comments and the list of changes. Not a sign-in —
        anyone can type any name.</p>
-    <p class="hint" id="set-status"></p>
+
+    <h3 class="set-section" id="ai-section">AI suggestions <span class="opt">— optional</span></h3>
+    <p class="hint">Rewrites, proofreading and replies to comments, using your own
+       key. Off until you add one. Only the words of the paragraphs involved are
+       sent, only when you ask, straight from this browser to the address below;
+       nothing changes until you accept a suggestion.</p>
+
+    <label for="set-ai-provider">Provider</label>
+    <select id="set-ai-provider"></select>
+
+    <label for="set-ai-url">Address</label>
+    <input id="set-ai-url" type="url" spellcheck="false" autocapitalize="off" placeholder="https://…">
+
+    <label for="set-ai-model">Model</label>
+    <input id="set-ai-model" spellcheck="false" autocapitalize="off"
+           placeholder="The model name from your provider’s documentation">
+
+    <label for="set-ai-key">API key</label>
+    <input id="set-ai-key" type="password" spellcheck="false" autocapitalize="off"
+           autocomplete="off" placeholder="Paste your key">
+    <p class="hint" id="set-ai-hint"></p>
+    <p class="hint">Kept in this browser’s storage for this app only — not synced,
+       never sent anywhere but the address above. The service must accept
+       requests from a web page; Anthropic, OpenAI, OpenRouter and Gemini do, and
+       a local server may need to be told to (for Ollama, <code>OLLAMA_ORIGINS</code>).</p>
+    <div class="settings-actions">
+      <button type="button" class="btn" id="set-ai-test">Test</button>
+      <button type="button" class="btn" id="set-ai-forget">Forget key</button>
+    </div>
+
+    <p class="hint" id="set-status" role="status"></p>
 
     <div class="settings-actions">
       <span class="spacer"></span>
@@ -125,6 +156,7 @@
 <script src="../src/lib/structures.js"></script>
 <script src="../src/lib/comments.js"></script>
 <script src="../src/lib/prompt.js"></script>
+<script src="../src/lib/ai.js"></script>
 <script src="../src/editor.js"></script>
 <script src="app.js"></script>
 </body>

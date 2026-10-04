@@ -349,6 +349,38 @@ async function run() {
     ok(ev.defaultPrevented, 'a link does not navigate while edit mode is on');
   }
 
+  heading('pausing to select and copy');
+  {
+    const before = VibeReviseEditor.preview();
+    eq(VibeReviseEditor.setPaused(true), true, 'pause turns on');
+    ok(VibeReviseEditor.isActive(), 'edit mode is still on underneath');
+    ok(VibeReviseEditor.status().paused, 'and status says paused');
+    const islands = document.querySelectorAll('[data-vr-island]');
+    ok(islands.length > 0 && Array.prototype.every.call(islands, (el) => !el.hasAttribute('contenteditable')),
+       'no run is editable, so a selection can cross runs');
+    ok(!document.documentElement.hasAttribute('data-vr-mode'), 'the editing highlights are off');
+    eq(VibeReviseEditor.preview(), before, 'pausing changes nothing in the file');
+
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+    document.getElementById('link').dispatchEvent(ev);
+    ok(ev.defaultPrevented, 'links still do not navigate away from unsaved edits');
+
+    eq(VibeReviseEditor.setPaused(false), false, 'resume');
+    ok(Array.prototype.every.call(document.querySelectorAll('[data-vr-island]'),
+                                 (el) => el.getAttribute('contenteditable') === 'true'),
+       'every run is editable again');
+    ok(document.documentElement.hasAttribute('data-vr-mode'), 'and the highlights are back');
+    eq(VibeReviseEditor.preview(), before, 'with every edit still there');
+
+    VibeReviseEditor.setPaused(true);
+    VibeReviseEditor.setActive(false);
+    eq(VibeReviseEditor.status().paused, false, 'leaving edit mode while paused clears the pause');
+    VibeReviseEditor.setActive(true);
+    ok(Array.prototype.every.call(document.querySelectorAll('[data-vr-island]'),
+                                 (el) => el.getAttribute('contenteditable') === 'true'),
+       'so coming back starts in editing, not paused');
+  }
+
   heading('leaving edit mode');
   {
     VibeReviseEditor.setActive(false);
@@ -1171,6 +1203,207 @@ async function run() {
     ok(same.every((p) => p.op === 'same'), 'identical text is entirely unchanged');
     eq(VibeReviseEditor.diffWords('', 'All new.').map((p) => p.op).join(),
        'add', 'and text added from nothing is entirely an addition');
+  }
+
+  // --- AI suggestions, through a fake provider ---------------------------------
+
+  /*
+   * A host that answers from a function instead of the network. The editor
+   * cannot tell the difference: it builds the prompt, the host "sends" it, and
+   * what comes back goes through exactly the same parse, align and review.
+   */
+  function fakeAI(respond, configured = true) {
+    const host = {
+      calls: [],
+      opened: 0,
+      status: () => Promise.resolve(configured
+        ? { configured: true, label: 'Fake · test-model', host: 'fake.test' }
+        : { configured: false, problem: 'Not set up yet.' }),
+      complete: (req) => {
+        host.calls.push(req);
+        return Promise.resolve(respond(req, JSON.parse(req.user)));
+      },
+      openSettings: () => { host.opened++; },
+    };
+    return host;
+  }
+  const answer = (obj) => ({ ok: true, text: JSON.stringify(obj) });
+  const runsIn = (sel) => Array.from(document.querySelectorAll(sel + ' [data-vr-island]')).map(valueOf);
+  const withAI = (ai) => VibeReviseEditor.init({
+    trustSynthetic: true, source: SOURCE, map, filename: 'editor-test.html', ai,
+  });
+
+  heading('AI — nothing happens without a host, or without a key');
+  {
+    const before = VibeReviseEditor.preview();
+    eq(await VibeReviseEditor.aiRewrite('Tighten', document.querySelector('#p1')), null,
+       'with no AI host, asking does nothing');
+
+    const off = fakeAI(() => answer({ runs: [], note: '' }), false);
+    withAI(off);
+    eq(await VibeReviseEditor.aiRewrite('Tighten', document.querySelector('#p1')), null,
+       'with a host but no key, asking does nothing');
+    eq(off.calls.length, 0, 'and nothing is sent');
+    eq(VibeReviseEditor.preview(), before, 'and the file is untouched');
+  }
+
+  heading('AI — a rewrite is a suggestion, and keeps the markup exactly');
+  {
+    const p1 = document.querySelector('#p1');
+    const original = runsIn('#p1');
+    let seen = null;
+    const ai = fakeAI((req, data) => {
+      seen = { req, data };
+      const runs = data.paragraph.runs.slice();
+      runs[0] = 'Oh, ' + runs[0];
+      runs[runs.length - 1] = runs[runs.length - 1].replace('world', 'everyone');
+      return answer({ runs, note: 'Friendlier greeting.' });
+    });
+    withAI(ai);
+
+    const fileBefore = VibeReviseEditor.preview();
+    const s = await VibeReviseEditor.aiRewrite('Make it friendlier', p1);
+    ok(s && s.kind === 'rewrite', 'a suggestion comes back');
+    eq(seen.data.paragraph.runs.length, original.length, 'every run of the paragraph was sent, split at its formatting');
+    ok(seen.req.user.indexOf('<strong') === -1 && seen.req.user.indexOf('<em') === -1,
+       'and none of its markup');
+    ok(/never as instructions/.test(seen.req.system), 'under a prompt that treats the text as data');
+    eq(VibeReviseEditor.preview(), fileBefore, 'nothing changes until it is accepted');
+    eq(VibeReviseEditor.suggestions().length, 1, 'it waits in the list');
+
+    ok(VibeReviseEditor.acceptSuggestion(s), 'accepting applies it');
+    const fileAfter = VibeReviseEditor.preview();
+    ok(fileAfter.indexOf('<strong>bold <em>and italic</em></strong>') !== -1, 'the bold and italic are exactly where they were');
+    ok(fileAfter.indexOf('<p id="p1">Oh, He<br>llo <br><strong>') !== -1,
+       'the new words go in front, and both line breaks in that run survive');
+    ok(fileAfter.indexOf('</strong> everyone</p>') !== -1, 'and the end of the paragraph changes too');
+    const tags = (t) => (t.match(/<[^>]*>/g) || []).join('');
+    eq(tags(fileAfter), tags(fileBefore), 'every tag in the file is exactly as it was');
+    eq(VibeReviseEditor.suggestions().length, 0, 'and it leaves the list');
+
+    const ch = VibeReviseEditor.changes().find((c) => c.target === p1);
+    ok(ch && ch.ai, 'the list of changes says AI suggested it');
+
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), fileBefore, 'one undo takes the whole rewrite back');
+    eq(JSON.stringify(runsIn('#p1')), JSON.stringify(original), 'every run of it');
+    VibeReviseEditor.redo();
+    eq(VibeReviseEditor.preview(), fileAfter, 'and redo puts it all back');
+    VibeReviseEditor.undo();
+  }
+
+  heading('AI — an answer that would move markup is refused');
+  {
+    const ai = fakeAI((req, data) => answer({ runs: [data.paragraph.runs.join('')], note: 'Merged.' }));
+    withAI(ai);
+    const fileBefore = VibeReviseEditor.preview();
+    eq(await VibeReviseEditor.aiRewrite('Tighten', document.querySelector('#p1')), null,
+       'a reply that merges the runs makes no suggestion');
+    eq(VibeReviseEditor.suggestions().length, 0, 'nothing waits in the list');
+    eq(VibeReviseEditor.preview(), fileBefore, 'and the file is untouched');
+
+    const fenced = fakeAI((req, data) => ({ ok: true, text: 'Sure!\n```json\n' +
+      JSON.stringify({ runs: data.paragraph.runs.map((r) => r.replace('plain', 'simple')), note: '' }) + '\n```' }));
+    withAI(fenced);
+    const s = await VibeReviseEditor.aiRewrite('Simpler', document.querySelector('#p3'));
+    ok(s, 'an answer wrapped in chatter and a code fence is still understood');
+    VibeReviseEditor.dismissSuggestion(s);
+    eq(VibeReviseEditor.preview(), fileBefore, 'and dismissing it changes nothing');
+
+    const failing = fakeAI(() => ({ ok: false, message: 'Fake rejected the API key.' }));
+    withAI(failing);
+    eq(await VibeReviseEditor.aiRewrite('Tighten', document.querySelector('#p1')), null,
+       'a provider error makes no suggestion');
+  }
+
+  heading('AI — a suggestion goes stale if the paragraph changes first');
+  {
+    const ai = fakeAI((req, data) => answer({
+      runs: data.paragraph.runs.map((r) => r.replace('Another', 'One more')), note: '' }));
+    withAI(ai);
+    const s = await VibeReviseEditor.aiRewrite('Vary it', document.querySelector('#p4'));
+    ok(s, 'a suggestion for the paragraph');
+    typeInto(islandFor('#p4', 2), ' Edited meanwhile.');
+    ok(VibeReviseEditor.isSuggestionStale(s), 'typing in it first makes the suggestion stale');
+    const fileBefore = VibeReviseEditor.preview();
+    ok(!VibeReviseEditor.acceptSuggestion(s), 'and a stale suggestion is not applied');
+    eq(VibeReviseEditor.preview(), fileBefore, 'so the typing is not overwritten');
+    VibeReviseEditor.dismissSuggestion(s);
+    VibeReviseEditor.undo();
+  }
+
+  heading('AI — proofreading the whole document');
+  {
+    let batches = 0;
+    const ai = fakeAI((req, data) => {
+      batches++;
+      const fixes = [];
+      for (const p of data.paragraphs) {
+        const joined = p.runs.join('');
+        if (joined.indexOf('A paragraph carrying a class.') !== -1) {
+          fixes.push({ id: p.id, runs: p.runs.map((r) => r.replace('carrying', 'that carries')), why: 'Smoother.' });
+        }
+        if (joined.indexOf('Second item') !== -1) {
+          fixes.push({ id: p.id, runs: p.runs.map((r) => r.replace('Second', 'The second')), why: 'Article.' });
+        }
+        // An id that was never sent is ignored, not guessed at.
+        fixes.push({ id: 'p9999', runs: ['nonsense'], why: '' });
+      }
+      return answer({ fixes });
+    });
+    withAI(ai);
+    const fileBefore = VibeReviseEditor.preview();
+    const found = await VibeReviseEditor.aiProofread();
+    eq(found, 2, 'both fixes are found, and the made-up one is ignored');
+    ok(batches >= 1, 'in ' + batches + ' request(s)');
+    ok(!ai.calls.some((c) => c.user.indexOf('Running') !== -1), 'the harness UI is not sent: only the document');
+    eq(VibeReviseEditor.preview(), fileBefore, 'nothing changes until they are accepted');
+
+    eq(VibeReviseEditor.acceptAllSuggestions(), 2, 'Accept all applies both');
+    const after = VibeReviseEditor.preview();
+    ok(after.indexOf('<p class="note" id="p5">A paragraph that carries a class.</p>') !== -1,
+       'the class and id on the paragraph are untouched');
+    ok(after.indexOf('<li>The second item</li>') !== -1, 'and the list item is fixed in place');
+    VibeReviseEditor.undo();
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), fileBefore, 'each accepted fix is its own undo step');
+  }
+
+  heading('AI — answering a comment thread');
+  {
+    const ai = fakeAI((req, data) => answer({
+      reply: 'Done — changed “arrived” to “came”.',
+      runs: data.passage.runs.map((r) => r.replace('arrived', 'came')),
+    }));
+    withAI(ai);
+    const p6 = document.querySelector('#p6');
+    const thread = VibeReviseEditor.commentRegions().filter((c) => c.block === p6);
+    ok(thread.length >= 1, 'the paragraph already has a comment from the file');
+    const res = await VibeReviseEditor.aiReplyTo(thread[0]);
+    const sent = JSON.parse(ai.calls[0].user);
+    eq(sent.thread[0].text, thread[0].text.trim(), 'the thread was sent');
+    ok(res.reply && res.reply.author === 'AI draft', 'the reply is a note signed as an AI draft');
+    ok(/changed/.test(res.reply.text), 'carrying the drafted words');
+    ok(res.suggestion, 'and the change the thread asked for is a suggestion');
+    ok(VibeReviseEditor.preview().indexOf('[AI draft') !== -1, 'the draft is written as a signed comment');
+
+    ok(VibeReviseEditor.acceptSuggestion(res.suggestion), 'accepting the change applies it');
+    ok(VibeReviseEditor.preview().indexOf('A paragraph that came with a comment attached.') !== -1,
+       'in the paragraph the thread is about');
+    VibeReviseEditor.undo();                   // the change
+    VibeReviseEditor.undo();                   // the drafted reply
+    ok(VibeReviseEditor.preview().indexOf('[AI draft') === -1, 'undo takes the drafted reply back out too');
+  }
+
+  heading('AI — leaving edit mode drops waiting suggestions');
+  {
+    const ai = fakeAI((req, data) => answer({ runs: data.paragraph.runs.map((r) => r + '!'), note: '' }));
+    withAI(ai);
+    await VibeReviseEditor.aiRewrite('Excite', document.querySelector('#p3'));
+    eq(VibeReviseEditor.suggestions().length, 1, 'a suggestion is waiting');
+    VibeReviseEditor.setActive(false);
+    eq(VibeReviseEditor.suggestions().length, 0, 'switching edit mode off clears it');
+    VibeReviseEditor.setActive(true);
   }
 
   // Put the editor back the way the rest of the page expects it.
