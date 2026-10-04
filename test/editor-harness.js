@@ -860,6 +860,68 @@ async function run() {
     VibeReviseEditor.undo();       // leave the document as we found it
   }
 
+  heading('inserting a structure — part-way through a paragraph splits it');
+  {
+    const before = VibeReviseEditor.preview();
+    const island = islandFor('#p6');
+    const text = valueOf(island);
+    caretTo(island, text.indexOf(' with'));
+    const tree = VibeReviseEditor.insertStructure('bullets');
+    ok(!!tree, 'a list was inserted from the middle of the paragraph');
+    eq(valueOf(islandFor('#p6')), 'A paragraph that arrived', 'the paragraph keeps the words before the cursor');
+    const tail = tree.element.nextElementSibling;
+    eq(tail.localName, 'p', 'the words after it go into a new paragraph after the list');
+    eq(tail.textContent, 'with a comment attached.', 'all of them, without the space they were cut at');
+    eq(tail.id, '', 'which does not copy the id');
+    eq(document.activeElement, tree.cells[0].island, 'and the cursor is in the first bullet');
+
+    typeInto(tree.cells[0].island, 'A point.');
+    const after = VibeReviseEditor.preview();
+    const at = (t) => after.indexOf(t);
+    ok(at('<p id="p6">A paragraph that arrived</p>') !== -1, 'the file has the first half');
+    ok(at('<p id="p6">A paragraph that arrived</p>') < at('<li>A point.</li>') &&
+       at('<li>A point.</li>') < at('<p>with a comment attached.</p>'),
+       'then the list, then the second half, in that order');
+
+    VibeReviseEditor.undo();       // the typing
+    VibeReviseEditor.undo();       // the split, all of it
+    eq(VibeReviseEditor.preview(), before, 'one undo takes the whole split back');
+    eq(valueOf(islandFor('#p6')), text, 'and the paragraph is whole again');
+    ok(!tail.isConnected && !tree.element.isConnected, 'with nothing left on the page');
+  }
+
+  heading('inserting a structure — a split that would move formatting is refused');
+  {
+    const before = VibeReviseEditor.preview();
+    caretTo(islandFor('#p1'), 1);          // before the paragraph's bold
+    eq(VibeReviseEditor.insertStructure('bullets'), null, 'nothing is inserted before bold in the same paragraph');
+    eq(VibeReviseEditor.preview(), before, 'and the file is untouched');
+  }
+
+  heading('inserting a structure — a list in a table cell goes inside the cell');
+  {
+    const before = VibeReviseEditor.preview();
+    const cell = document.querySelector('#t1 tbody td');
+    caretTo(islandFor('#t1 tbody td'));
+    const tree = VibeReviseEditor.insertStructure('bullets');
+    ok(!!tree, 'a list was inserted');
+    eq(tree.element.parentNode, cell, 'inside the cell, not beside it');
+    typeInto(tree.cells[0].island, 'In the cell.');
+    const parsed = new DOMParser().parseFromString(VibeReviseEditor.preview(), 'text/html');
+    const li = Array.from(parsed.querySelectorAll('li')).find((l) => l.textContent === 'In the cell.');
+    ok(li && li.parentNode.parentNode.localName === 'td', 'and the saved file has it inside the cell too');
+    eq(parsed.querySelectorAll('#t1 tbody tr')[0].children.length, 2, 'the row still has its two cells');
+    VibeReviseEditor.undo();
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), before, 'undo takes it back out');
+
+    caretTo(islandFor('#t1 tbody td'));
+    const table = VibeReviseEditor.insertStructure('table');
+    ok(table && table.element.previousElementSibling === document.querySelector('#t1'),
+       'a table asked for in a cell goes after the whole table instead');
+    VibeReviseEditor.undo();
+  }
+
   // Pressing a key on whatever has focus: the editor listens on the document,
   // so this reaches it the same way a real key press would.
   function press(key, opts) {
@@ -1205,6 +1267,70 @@ async function run() {
        'add', 'and text added from nothing is entirely an addition');
   }
 
+  heading('the list of changes — undoing one change, and only that one');
+  {
+    // Earlier sections leave their own edits on the page; this counts from
+    // whatever is there and checks that only the chosen row moves.
+    VibeReviseEditor.setActive(true);
+    const start = VibeReviseEditor.preview();
+    const n = () => VibeReviseEditor.changes().length;
+    const row = (pred) => VibeReviseEditor.changes().find(pred);
+    const p6 = document.querySelector('#p6');
+    const cell = document.querySelector('#t1 tbody td');
+    const base = n();
+
+    typeInto(islandFor('#t1 tbody td'), ' Kept edit.');
+    typeInto(islandFor('#p6'), ' Undo me.');
+    const both = VibeReviseEditor.preview();
+    ok(VibeReviseEditor.revertChange(row((c) => c.kind === 'edit' && c.target === p6)), 'an edit is undone from its row');
+    const after = VibeReviseEditor.preview();
+    ok(after.indexOf('Undo me.') === -1, 'its words are gone from the file');
+    ok(after.indexOf('Kept edit.') !== -1, 'and the other edit is left exactly where it was');
+    ok(!row((c) => c.kind === 'edit' && c.target === p6), 'its row is gone');
+
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), both, 'Ctrl/Cmd+Z brings the undone change back');
+    VibeReviseEditor.redo();
+    eq(VibeReviseEditor.preview(), after, 'and redo undoes it again');
+
+    // A comment added, then undone from the list.
+    const added = VibeReviseEditor.addCommentTo(document.getElementById('p4'));
+    writeComment(added, 'take this back');
+    ok(VibeReviseEditor.preview().indexOf('take this back') !== -1, 'a new comment is in the file');
+    ok(VibeReviseEditor.revertChange(row((c) => c.region === added)), 'undoing its row');
+    ok(VibeReviseEditor.preview().indexOf('take this back') === -1, 'takes it back out');
+
+    // A comment from the file, reworded, then deleted: undoing the row puts
+    // back what the file had, not the rewording.
+    const existing = VibeReviseEditor.commentRegions().find((r) => r.original === 'this note was already in the file')
+      || VibeReviseEditor.commentRegions().find((r) => r.removed && r.original === 'this note was already in the file');
+    writeComment(existing, 'reworded first');
+    VibeReviseEditor.removeComment(existing);
+    ok(VibeReviseEditor.preview().indexOf('this note was already in the file') === -1, 'a comment from the file is deleted');
+    ok(VibeReviseEditor.revertChange(row((c) => c.region === existing)), 'undoing its row');
+    const restored = VibeReviseEditor.preview();
+    ok(restored.indexOf('<!-- comment: this note was already in the file -->') !== -1,
+       'brings it back in its original words');
+    ok(restored.indexOf('reworded first') === -1, 'not the rewording');
+    VibeReviseEditor.undo();
+    ok(VibeReviseEditor.preview().indexOf('this note was already in the file') === -1,
+       'and one Ctrl/Cmd+Z deletes it again');
+    VibeReviseEditor.redo();
+    writeComment(existing, 'rewritten note');   // as the earlier section left it
+
+    // An added paragraph with words in it.
+    VibeReviseEditor.addAfterIsland(islandFor('#p5'));
+    typeInto(document.getElementById('p5').nextElementSibling.querySelector('[data-vr-island]'), 'An added paragraph.');
+    ok(VibeReviseEditor.preview().indexOf('An added paragraph.') !== -1, 'an added paragraph is in the file');
+    ok(VibeReviseEditor.revertChange(row((c) => c.kind === 'added' && c.after === 'An added paragraph.')),
+       'undoing its row');
+    ok(VibeReviseEditor.preview().indexOf('An added paragraph.') === -1, 'takes it back out');
+
+    ok(VibeReviseEditor.revertChange(row((c) => c.target === cell)), 'undoing the kept edit too');
+    eq(n(), base, 'leaves exactly the rows there were before');
+    eq(VibeReviseEditor.preview(), start, 'and the file exactly as it was');
+  }
+
   // --- AI suggestions, through a fake provider ---------------------------------
 
   /*
@@ -1212,12 +1338,12 @@ async function run() {
    * cannot tell the difference: it builds the prompt, the host "sends" it, and
    * what comes back goes through exactly the same parse, align and review.
    */
-  function fakeAI(respond, configured = true) {
+  function fakeAI(respond, configured = true, access = 'write') {
     const host = {
       calls: [],
       opened: 0,
       status: () => Promise.resolve(configured
-        ? { configured: true, label: 'Fake · test-model', host: 'fake.test' }
+        ? { configured: true, label: 'Fake · test-model', host: 'fake.test', access }
         : { configured: false, problem: 'Not set up yet.' }),
       complete: (req) => {
         host.calls.push(req);
@@ -1283,6 +1409,11 @@ async function run() {
 
     const ch = VibeReviseEditor.changes().find((c) => c.target === p1);
     ok(ch && ch.ai, 'the list of changes says AI suggested it');
+    eq(ch && ch.model, 'test-model', 'and names the model that wrote it');
+    ok(/AI \(test-model\)/.test(VibeReviseEditor.changeHeading(ch)), 'as an author in the row heading');
+    // #p1 already had a person's edits in it, so the row is both of theirs.
+    ok(ch && ch.human && / and AI /.test(VibeReviseEditor.changeHeading(ch)),
+       'a paragraph a person had already edited is shown as theirs and AI\'s');
 
     VibeReviseEditor.undo();
     eq(VibeReviseEditor.preview(), fileBefore, 'one undo takes the whole rewrite back');
@@ -1290,6 +1421,65 @@ async function run() {
     VibeReviseEditor.redo();
     eq(VibeReviseEditor.preview(), fileAfter, 'and redo puts it all back');
     VibeReviseEditor.undo();
+  }
+
+  heading('AI — a paragraph only AI changed is AI\'s, accepted by you');
+  {
+    const ai = fakeAI((req, data) => answer({
+      runs: data.paragraph.runs.map((r) => r.replace('Occupancy', 'Usage')), note: '' }));
+    withAI(ai);
+    const was = VibeReviseEditor.status().author;
+    VibeReviseEditor.setAuthor('Cara');
+    const cell = document.querySelector('#t1 tbody td');
+    const s = await VibeReviseEditor.aiRewrite('Plainer', cell);
+    ok(s && VibeReviseEditor.acceptSuggestion(s), 'a suggestion for an untouched cell is accepted');
+    const ch = VibeReviseEditor.changes().find((c) => c.kind === 'edit' && c.target === cell);
+    eq(VibeReviseEditor.changeHeading(ch), 'AI (test-model) · edited · accepted by Cara',
+       'the row names AI as the author, and who accepted it');
+    typeInto(islandFor('#t1 tbody td'), '!');
+    eq(VibeReviseEditor.changeHeading(VibeReviseEditor.changes().find((c) => c.kind === 'edit' && c.target === cell)),
+       'Cara and AI (test-model) · edited', 'typing into it afterwards makes it a joint edit');
+    VibeReviseEditor.undo();
+    VibeReviseEditor.undo();
+    ok(!VibeReviseEditor.changes().some((c) => c.target === cell), 'and undo takes it all back');
+    VibeReviseEditor.setAuthor(was);
+  }
+
+  heading('AI — read only: suggestions are advice, and cannot be applied');
+  {
+    const ai = fakeAI((req, data) => answer({
+      runs: data.paragraph.runs.map((r) => r.replace('Measure', 'Metric')), note: '' }), true, 'read');
+    withAI(ai);
+    const before = VibeReviseEditor.preview();
+    const s = await VibeReviseEditor.aiRewrite('Plainer', document.querySelector('#t1 thead th'));
+    ok(!!s, 'AI still suggests an edit');
+    ok(!VibeReviseEditor.acceptSuggestion(s), 'but it cannot be accepted');
+    eq(VibeReviseEditor.acceptAllSuggestions(), 0, 'not even all at once');
+    eq(VibeReviseEditor.preview(), before, 'so the document is untouched');
+    ok(VibeReviseEditor.suggestions().indexOf(s) !== -1, 'and the suggestion stays to be read or copied');
+    VibeReviseEditor.dismissSuggestion(s);
+  }
+
+  heading('AI — Explain changes nothing, and can be kept as a comment');
+  {
+    let seen = null;
+    const ai = fakeAI((req, data) => { seen = data; return answer({ explanation: 'It says the paragraph had a note.' }); },
+                      true, 'read');
+    withAI(ai);
+    const before = VibeReviseEditor.preview();
+    const p6 = document.querySelector('#p6');
+    const ex = await VibeReviseEditor.aiExplain(p6);
+    ok(ex && ex.text === 'It says the paragraph had a note.', 'an explanation comes back');
+    eq(seen.paragraph, 'A paragraph that arrived with a comment attached.', 'for the paragraph asked about');
+    eq(VibeReviseEditor.preview(), before, 'and the document is untouched, even in read only');
+
+    const region = VibeReviseEditor.saveExplanation();
+    ok(!!region, 'it can be saved as a comment');
+    ok(/\(AI draft\)|^AI draft$/.test(region.author), 'signed as an AI draft');
+    ok(VibeReviseEditor.preview().indexOf('It says the paragraph had a note.') !== -1, 'which goes in the file');
+    eq(VibeReviseEditor.explanation(), null, 'and the explanation is done with');
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), before, 'undo takes the comment back out');
   }
 
   heading('AI — an answer that would move markup is refused');

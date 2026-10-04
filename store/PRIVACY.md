@@ -37,7 +37,9 @@ Nothing, except in two cases you choose yourself:
   compatible address, including a model on your own computer. When you press a
   button asking for a suggestion, VibeRevise sends that service the words of
   the paragraphs involved. A rewrite also sends a little of the text either
-  side for context, and asking about a comment thread also sends the thread.
+  side for context, asking for an explanation sends the words you selected or
+  the paragraph you are in, with a little text either side, and asking about a
+  comment thread also sends the thread.
   It never sends the whole file or its markup. The request goes from your
   browser straight to the service, with your key; it does not pass through
   anything of ours. What that service does with it is governed by your

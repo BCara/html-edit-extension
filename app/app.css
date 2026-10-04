@@ -382,3 +382,8 @@ body {
   margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--line);
   font-size: 15px;
 }
+.settings fieldset.ai-access { border: 0; padding: 0; margin: 12px 0 0; }
+.settings fieldset.ai-access legend { font-weight: 600; font-size: 13px; padding: 0; }
+.settings label.choice { display: flex; gap: 9px; align-items: flex-start; font-weight: 400;
+  font-size: 13px; line-height: 1.5; margin-top: 8px; }
+.settings label.choice input { width: auto; min-height: 0; margin: 3px 0 0; flex: none; }

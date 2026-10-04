@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="options.css">
 <main class="wrap">
   <h1>AI settings</h1>
-  <p class="lede">VibeRevise can suggest rewrites, proofread a document and draft
+  <p class="lede">VibeRevise can explain a passage, suggest rewrites, proofread a document and draft
      replies to comments using an AI service you already have an account with.
      It is <b>off until you add a key</b>, and it only ever sends anything when
      you press a button asking for a suggestion.</p>
@@ -32,6 +32,16 @@
     </div>
     <p class="hint" id="key-hint"></p>
 
+    <fieldset class="access">
+      <legend>What AI may do</legend>
+      <label class="choice"><input type="radio" name="access" id="access-read" value="read" checked>
+        <span><b>Read</b> — explains, reviews, replies to comments and suggests
+        edits. You make every change yourself.</span></label>
+      <label class="choice"><input type="radio" name="access" id="access-write" value="write">
+        <span><b>Read and write</b> — its suggested edits also get an
+        <b>Accept</b> button. Nothing changes until you press it.</span></label>
+    </fieldset>
+
     <div class="actions">
       <button type="submit" class="primary" id="save">Save and allow</button>
       <button type="button" id="test">Test saved settings</button>
@@ -44,13 +54,14 @@
     <h2>What happens to your text</h2>
     <ul>
       <li><b>Sent only when you ask.</b> Pressing a rewrite, Proofread or Ask AI
-          button sends the words of the paragraphs involved — plus, for a rewrite,
+          button, or Explain, sends the words of the paragraphs involved — plus, for a rewrite,
           a little of the text either side for context, and for Ask AI the
           comment thread — straight to the address above. Never the file or its
           markup, and nothing goes to VibeRevise or anyone else.</li>
-      <li><b>Nothing changes until you accept.</b> Every answer is shown as a
-          suggestion beside the paragraph. Accepting it is one undo step, and the
-          list of changes marks it as AI-suggested.</li>
+      <li><b>AI never changes the document on its own.</b> On <b>Read</b>, every
+          change is one you type. On <b>Read and write</b>, a suggestion changes
+          the document only when you press Accept. That is one undo step, and the
+          list of changes names AI and the model as its author.</li>
       <li><b>Your key stays in this browser.</b> It is kept in this Chrome profile
           on this device, is not synced, and is only read by VibeRevise’s own
           background worker — never by the pages you edit. Anyone with access to

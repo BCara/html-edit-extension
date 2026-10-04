@@ -115,6 +115,7 @@
     aiStatus: null,       // { configured, label, problem }, as the host last said
     aiJob: null,          // the request in flight, so it can be cancelled
     suggestions: [],      // AI suggestions waiting for accept or dismiss
+    explanation: null,    // the last thing AI explained: { block, quote, text }
     nudgedName: false,    // suggested adding a name once already
     source: '',
     map: null,
@@ -462,7 +463,10 @@
     return !!(block && anchorForBlock(block));
   }
 
-  function addAfterBlock(block) {
+  // opts.like: copy this block's tag and class instead of `block`'s.
+  // opts.text: start with these words in it. opts.quiet: leave the caret be.
+  function addAfterBlock(block, opts) {
+    opts = opts || {};
     if (!block) { flash('There is nothing here to add another of'); return null; }
 
     var anchor = anchorForBlock(block);
@@ -471,7 +475,7 @@
       return null;
     }
 
-    var template = Blocks.templateFor(block);
+    var template = Blocks.templateFor(opts.like || block);
     var element = doc().createElement(template.tag);
     if (template.className) element.setAttribute('class', template.className);
 
@@ -498,10 +502,18 @@
     state.byIsland.set(island, region);
     state.byElement.set(element, region);
 
+    if (opts.text) {
+      Islands.writeValue(island, opts.text);
+      region.current = opts.text;
+      region.by = authorName();
+    }
+
     pushHistory({ kind: 'add', region: region });
 
-    island.focus();
-    Islands.setCaret(island, 0);
+    if (!opts.quiet) {
+      island.focus();
+      Islands.setCaret(island, 0);
+    }
     hideAdd();
     refresh();
     return region;
@@ -544,6 +556,78 @@
   }
 
   /*
+   * Where a structure goes for `block`: { parent, before, anchor }.
+   *
+   * Normally straight after the block. A table cell is the exception: after a
+   * <td> is still inside the row, where a browser draws anything as one more
+   * cell and the saved file would have a list sitting between two cells. So a
+   * list, heading or paragraph goes INSIDE the cell, under its text, and a
+   * table (no tables in tables) goes after the whole table.
+   */
+  function placementFor(block, id) {
+    var tag = block.localName;
+    if (tag === 'td' || tag === 'th') {
+      var inside = id !== 'table' && anchorInside(block);
+      if (inside) return { parent: block, before: null, anchor: inside };
+      var table = block.closest('table');
+      var after = table && anchorForBlock(table);
+      if (after) return { parent: table.parentNode, before: table.nextSibling, anchor: after };
+      return null;
+    }
+    var anchor = anchorForBlock(block);
+    return anchor ? { parent: block.parentNode, before: block.nextSibling, anchor: anchor } : null;
+  }
+
+  // Just inside the closing tag of a cell from the file, so what goes there
+  // sits under the cell's own text, one level further in.
+  function anchorInside(block) {
+    var range = state.map.elements.get(block);
+    if (!range || !range.endTag || !range.startTag) return null;
+    var newline = Blocks.newlineOf(state.source);
+    var indent = Blocks.indentOf(state.source, range.startTag.start);
+    return { offset: range.endTag.start, before: newline + indent + '  ', after: newline + indent };
+  }
+
+  /*
+   * Is the caret part-way through a paragraph? If so, where to cut it:
+   * { island, region, block, head, tail }, or { refuse } with the reason.
+   *
+   * The cut has to leave every tag where it was. The words after the caret
+   * move into a new paragraph, so they must be plain words: the caret has to
+   * be in the paragraph's last run of text, and not inside bold or a link.
+   */
+  function splitPoint() {
+    var island = islandOf(doc().activeElement);
+    if (!island) return null;
+    var region = regionOf(island);
+    if (!region || (region.kind !== 'text' && region.kind !== 'insert')) return null;
+    var block = Blocks.blockFor(island);
+    if (!block || block.localName === 'td' || block.localName === 'th') return null;
+    var at = Islands.caretIndex(island);
+    if (at == null) return null;
+
+    var EDGE = /^[\s\u0001]+|[\s\u0001]+$/g;
+    var value = region.current;
+    var head = value.slice(0, at), tail = value.slice(at);
+    var runs = runsOf(block);
+    var me = runs.indexOf(region);
+    var laterText = runs.slice(me + 1).some(function (r) { return r.current.replace(EDGE, ''); });
+    var earlierText = runs.slice(0, me).some(function (r) { return r.current.replace(EDGE, ''); });
+
+    // At either end there is nothing to split: it goes after, as it always has.
+    if (!tail.replace(EDGE, '') && !laterText) return null;
+    if (!head.replace(EDGE, '') && !earlierText) return null;
+    if (laterText || island.parentNode !== block) {
+      return { refuse: 'VibeRevise cannot split a paragraph inside or before its bold, italic or links — move the cursor past them' };
+    }
+    return {
+      island: island, region: region, block: block,
+      head: head.replace(/[\s\u0001]+$/, ''),
+      tail: tail.replace(/^[\s\u0001]+/, ''),
+    };
+  }
+
+  /*
    * Add a structure — a table, a list, a heading — after the current block.
    *
    * Unlike addAfterBlock, which owns one element holding one run of text, this
@@ -555,19 +639,36 @@
    *   - one tree region owns the anchor and the markup, and is shaped enough
    *     like an added block that setAdded() moves it in and out for undo
    *
-   * collectEdits skips the cells; collectStructureEdits emits the tree once.
+   * collectEdits emits the tree once, at its first cell, rather than per cell.
    */
   function insertStructure(id, where) {
     var block = where || currentBlock();
     if (!block) { flash('VibeRevise cannot tell where to put that in the file'); return null; }
 
-    var anchor = anchorForBlock(block);
-    if (!anchor) { flash('VibeRevise cannot tell where this block ends in the file'); return null; }
+    // Part-way through a paragraph, the paragraph is split around it. Only
+    // from the caret: the + beside a block means "after this block".
+    var split = where ? null : splitPoint();
+    if (split && split.refuse) { flash(split.refuse); return null; }
+
+    var place = placementFor(block, id);
+    if (!place) { flash('VibeRevise cannot tell where this block ends in the file'); return null; }
+    var anchor = place.anchor;
 
     var built = Structures.build(document, id, block);
     if (!built) { flash('VibeRevise does not know how to add that'); return null; }
 
-    block.parentNode.insertBefore(built.element, block.nextSibling);
+    // Everything a split does is one undo step, so note where history was.
+    var mark = 0;
+    if (split) {
+      if (state.historyAt < state.history.length) state.history.length = state.historyAt;
+      mark = state.history.length;
+      state.lastTouch = 0;            // the cut must not merge into earlier typing
+      var cutFrom = split.region.current;
+      Islands.writeValue(split.island, split.head);
+      recordChange(split.island, cutFrom);
+    }
+
+    place.parent.insertBefore(built.element, place.before);
 
     var tree = {
       kind: 'tree',
@@ -606,6 +707,14 @@
     state.byElement.set(built.element, tree);
 
     pushHistory({ kind: 'add', region: tree });
+
+    if (split) {
+      // The rest of the paragraph goes after the new structure, as a paragraph
+      // like the one it came from.
+      addAfterBlock(built.element, { like: split.block, text: split.tail, quiet: true });
+      var steps = state.history.splice(mark);
+      pushHistory({ kind: 'group', entries: steps });
+    }
 
     tree.island.focus();
     Islands.setCaret(tree.island, 0);
@@ -694,6 +803,7 @@
     state.lastTouch = now;
     region.current = after;
     region.by = authorName();
+    if (region.ai) region.humanToo = true;
     markChanged(region);
     refresh();
   }
@@ -714,14 +824,29 @@
    * puts every run back, and who did it and whether AI suggested it go back
    * with them.
    */
+  function multiChange(r, after) {
+    return {
+      region: r, before: r.current, after: after,
+      aiBefore: !!r.ai, byBefore: r.by, modelBefore: r.aiModel || null,
+      humanBefore: !!r.humanToo,
+      humanAfter: !!r.humanToo || (!r.ai && r.current !== r.original),
+    };
+  }
+
   function applyMulti(entry, forward) {
     for (var i = 0; i < entry.changes.length; i++) {
       var c = entry.changes[i];
       var value = forward ? c.after : c.before;
       Islands.writeValue(c.region.island, value);
       c.region.current = value;
-      c.region.ai = forward ? true : c.aiBefore;
-      c.region.by = forward ? entry.by : c.byBefore;
+      // An accepted suggestion is AI's; putting a run back as the file had it
+      // (undoing one change from the list) is nobody's.
+      c.region.ai = forward ? (entry.revert ? false : true) : c.aiBefore;
+      c.region.by = forward ? (entry.revert ? null : entry.by) : c.byBefore;
+      c.region.aiModel = forward ? (entry.revert ? null : entry.model) : c.modelBefore;
+      // Words a person typed before the suggestion are still in what it
+      // wrote, so the run stays theirs as well as AI's.
+      c.region.humanToo = forward ? (!entry.revert && c.humanAfter) : c.humanBefore;
       markChanged(c.region);
     }
     state.lastTouch = 0;
@@ -757,8 +882,19 @@
   function undo() {
     flushCommentEdit();
     if (state.historyAt === 0) { flash('Nothing to undo'); return; }
-    var entry = state.history[--state.historyAt];
-    if (entry.kind === 'add') setAdded(entry.region, false);
+    undoEntry(state.history[--state.historyAt]);
+  }
+
+  function redo() {
+    flushCommentEdit();
+    if (state.historyAt >= state.history.length) { flash('Nothing to redo'); return; }
+    redoEntry(state.history[state.historyAt++]);
+  }
+
+  // A 'group' is several entries taken as one step: undone last-first.
+  function undoEntry(entry) {
+    if (entry.kind === 'group') { for (var i = entry.entries.length - 1; i >= 0; i--) undoEntry(entry.entries[i]); }
+    else if (entry.kind === 'add') setAdded(entry.region, false);
     else if (entry.kind === 'remove-added') setAdded(entry.region, true);
     else if (entry.kind === 'multi') applyMulti(entry, false);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, true);
@@ -767,11 +903,9 @@
     else applyHistory(entry.region, entry.before, entry.caretBefore);
   }
 
-  function redo() {
-    flushCommentEdit();
-    if (state.historyAt >= state.history.length) { flash('Nothing to redo'); return; }
-    var entry = state.history[state.historyAt++];
-    if (entry.kind === 'add') setAdded(entry.region, true);
+  function redoEntry(entry) {
+    if (entry.kind === 'group') entry.entries.forEach(redoEntry);
+    else if (entry.kind === 'add') setAdded(entry.region, true);
     else if (entry.kind === 'remove-added') setAdded(entry.region, false);
     else if (entry.kind === 'multi') applyMulti(entry, true);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, false);
@@ -2274,15 +2408,17 @@
         var block = Blocks.blockFor(r.island) || r.island;
         var group = byBlock.get(block);
         if (!group) {
-          group = { kind: 'edit', block: block, by: r.by, target: block };
+          group = { kind: 'edit', block: block, by: r.by, target: block, regions: [] };
           byBlock.set(block, group);
           list.push(group);
         }
+        group.regions.push(r);
         if (r.by) group.by = r.by;
-        if (r.ai) group.ai = true;
+        if (r.ai) { group.ai = true; group.model = group.model || r.aiModel; }
+        if (!r.ai || r.humanToo) group.human = true;
       } else if (r.kind === 'insert' && !r.removed && r.current) {
         list.push({ kind: 'added', what: describeTag(r.template.tag), after: r.current,
-                    by: r.by, ai: !!r.ai, target: r.element });
+                    by: r.by, ai: !!r.ai, target: r.element, region: r });
       }
     }
     // Each group's before and after is the whole block's text, unchanged runs
@@ -2306,18 +2442,18 @@
       list.push({ kind: 'added', what: Structures.kindById(t.id).label.toLowerCase(),
                   after: typed.map(function (c) { return c.current; }).join(' · '),
                   by: typed[0] && typed[0].by,
-                  target: t.element });
+                  target: t.element, region: t });
     }
     for (i = 0; i < state.comments.length; i++) {
       var c = state.comments[i];
       var text = c.text.trim();
       var target = c.block;
       if (c.removed) {
-        if (c.token) list.push({ kind: 'comment-del', before: c.original, by: c.author, target: target });
+        if (c.token) list.push({ kind: 'comment-del', before: c.original, by: c.author, target: target, region: c });
       } else if (!c.token && text) {
-        list.push({ kind: 'comment-add', after: text, by: c.author || authorName(), target: target });
+        list.push({ kind: 'comment-add', after: text, by: c.author || authorName(), target: target, region: c });
       } else if (c.token && text !== c.original) {
-        list.push({ kind: 'comment-edit', before: c.original, after: text, by: c.author, target: target });
+        list.push({ kind: 'comment-edit', before: c.original, after: text, by: c.author, target: target, region: c });
       }
     }
 
@@ -2332,7 +2468,12 @@
     var who = displayName(ch.by);
     var ai = ch.ai ? ' (AI suggested)' : '';
     if (ch.kind === 'edit') {
-      return who + ' · edited' + ai;
+      // AI is named as an author in its own right, the way a person is, with
+      // whoever accepted it alongside.
+      var bot = ch.model ? 'AI (' + ch.model + ')' : 'AI';
+      if (ch.ai && ch.human) return who + ' and ' + bot + ' · edited';
+      if (ch.ai) return bot + ' · edited · accepted by ' + who;
+      return who + ' · edited';
     }
     if (ch.kind === 'added') return who + ' · added a ' + ch.what + ai;
     if (ch.kind === 'comment-add') return who + ' · added a comment';
@@ -2404,6 +2545,58 @@
     });
   }
 
+  /*
+   * Undo one change from the list, leaving every other change alone.
+   *
+   * Ctrl/Cmd+Z can only walk back through history in order, so taking back
+   * the third edit of ten meant taking back the seven after it too. This puts
+   * that one thing back as the file had it, and does so as a new history step
+   * of its own: Ctrl/Cmd+Z straight afterwards brings the change back.
+   *
+   * `ch` is a row from collectChanges(), taken fresh, so it describes the page
+   * as it is now.
+   */
+  function revertChange(ch) {
+    if (!state.active || !ch) return false;
+    flushCommentEdit();
+
+    if (ch.kind === 'edit') {
+      var changes = [];
+      ch.regions.forEach(function (r) {
+        if (r.current === r.original) return;
+        changes.push(multiChange(r, r.original));
+      });
+      if (!changes.length) return false;
+      var entry = { kind: 'multi', changes: changes, revert: true };
+      pushHistory(entry);
+      applyMulti(entry, true);
+      renderReview();         // a suggestion for that paragraph is stale now
+    } else if (ch.kind === 'added') {
+      if (!ch.region || ch.region.removed) return false;
+      setAdded(ch.region, false);
+      pushHistory({ kind: 'remove-added', region: ch.region });
+    } else if (ch.kind === 'comment-add') {
+      removeComment(ch.region);
+    } else if (ch.kind === 'comment-del' || ch.kind === 'comment-edit') {
+      // Back as the file has it: shown, and in its original words, as one step.
+      // A 'comment-add' entry is exactly "shown": redo shows it, undo removes it.
+      var steps = [];
+      if (ch.region.removed) steps.push({ kind: 'comment-add', region: ch.region });
+      if (ch.region.text !== ch.region.original) {
+        steps.push({ kind: 'comment-text', region: ch.region, before: ch.region.text, after: ch.region.original });
+      }
+      if (!steps.length) return false;
+      var group = { kind: 'group', entries: steps };
+      pushHistory(group);
+      redoEntry(group);
+    } else {
+      return false;
+    }
+    refresh();
+    flash('Undone — Ctrl/Cmd+Z brings it back');
+    return true;
+  }
+
   function openChanges() {
     closeReview();
     ensureAssist().changes.hidden = false;
@@ -2463,6 +2656,15 @@
         setTimeout(function () { ch.target.removeAttribute(ACTIVE_ATTR); }, 1400);
       });
       li.appendChild(btn);
+      var undoBtn = doc().createElement('button');
+      undoBtn.className = 'c-undo';
+      undoBtn.textContent = 'Undo';
+      undoBtn.title = ch.kind === 'comment-del' ? 'Bring this comment back'
+        : ch.kind === 'added' || ch.kind === 'comment-add' ? 'Take this back out'
+        : 'Put this back as it is in the file';
+      undoBtn.setAttribute('aria-label', 'Undo this change: ' + changeHeading(ch));
+      undoBtn.addEventListener('click', function () { revertChange(ch); });
+      li.appendChild(undoBtn);
       ol.appendChild(li);
     });
     box.appendChild(ol);
@@ -2495,7 +2697,11 @@
     '  padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, .06);',
     '  border-left: 3px solid rgba(255, 255, 255, .25); }',
     '.c-row:hover { background: rgba(255, 255, 255, .12); }',
-    '.c-who { font-weight: 600; font-size: 12px; }',
+    '.c-list li { position: relative; }',
+    '.c-who { font-weight: 600; font-size: 12px; padding-right: 52px; }',
+    '.c-undo { position: absolute; top: 6px; right: 6px; padding: 2px 9px; border-radius: 999px;',
+    '  font-size: 11.5px; background: rgba(255, 255, 255, .13); }',
+    '.c-undo:hover { background: rgba(255, 255, 255, .24); }',
     '.c-diff { color: #d6d9e0; font-size: 12px; overflow-wrap: anywhere; }',
     'del { color: #ff9f9f; text-decoration: line-through; text-decoration-color: rgba(255,159,159,.7); }',
     'del + ins, ins + del { margin-left: .3em; }',
@@ -2523,6 +2729,8 @@
     '.s-show:hover { color: #fff; background: rgba(255, 255, 255, .1); }',
     '.s-why { color: #9aa0ad; font-size: 11.5px; }',
     '.s-stale { color: #ffb3b3; font-size: 11.5px; }',
+    '.s-item.explain { border-left-color: #5fb3d9; }',
+    '.s-explain { color: #e4e7ee; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }',
   ].join('\n');
 
   function ensureAssist() {
@@ -2604,6 +2812,8 @@
       '</div>' +
       '<div class="ai-section ai-ready" hidden>' +
         '<div class="ai-target"></div>' +
+        '<button class="p-changes ai-explain" title="Explain the selection, or this paragraph. Changes nothing.">' +
+          'Explain</button>' +
         '<div class="ai-chips">' +
           AI_CHIPS.map(function (c, i) {
             return '<button data-chip="' + i + '" title="' + c[1] + '">' + c[0] + '</button>';
@@ -2669,6 +2879,12 @@
       e.stopPropagation();        // typing an instruction is not an editing shortcut
     });
     shadow.querySelector('.ai-proofread').addEventListener('click', function () { aiProofread(); });
+    // mousedown with the default prevented, so a selection in the document
+    // survives the press and Explain can see what was selected.
+    shadow.querySelector('.ai-explain').addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      aiExplain();
+    });
     ui.aiReviewBtn.addEventListener('click', function () { setAIOpen(false); openReview(); });
     shadow.querySelector('.ai-cancel').addEventListener('click', cancelAI);
     renderAI();
@@ -2694,6 +2910,7 @@
     return Promise.resolve(state.ai.status()).then(function (st) {
       state.aiStatus = st || { configured: false };
       renderAI();
+      renderReview();         // Read or read-and-write decides its buttons
       return state.aiStatus;
     }).catch(function (err) {
       state.aiStatus = { configured: false, problem: String(err && err.message || err) };
@@ -2701,6 +2918,18 @@
       return state.aiStatus;
     });
   }
+
+  // Just the model, for naming AI in the list of changes.
+  function aiModelName() {
+    var label = state.aiStatus && state.aiStatus.label;
+    if (!label) return null;
+    var parts = String(label).split(' · ');
+    return parts[parts.length - 1] || null;
+  }
+
+  // Read and write: suggestions can be accepted. Read (the default): AI only
+  // advises, and every change in the document is one the user typed.
+  function aiCanWrite() { return !!(state.aiStatus && state.aiStatus.access === 'write'); }
 
   function aiReady() { return !!(state.ai && state.aiStatus && state.aiStatus.configured); }
 
@@ -2724,7 +2953,9 @@
       ui.aiReady.hidden = true;
       return;
     }
-    ui.aiStatus.textContent = st.configured ? st.label : (st.problem || 'Not set up yet.');
+    ui.aiStatus.textContent = st.configured
+      ? st.label + (aiCanWrite() ? ' \u00b7 read and write' : ' \u00b7 read only')
+      : (st.problem || 'Not set up yet.');
     ui.aiStatus.className = 'ai-status' + (st.configured ? '' : ' warn');
     ui.aiSetup.hidden = st.configured;
     ui.aiReady.hidden = !st.configured || busy;
@@ -2738,7 +2969,9 @@
     ui.aiReviewBtn.hidden = n === 0;
     ui.aiReviewBtn.textContent = 'Review suggestions (' + n + ')';
     ui.aiDisclose.textContent = 'Sends only the words of the paragraphs involved to ' +
-      (st.host || 'your AI provider') + '. Nothing changes until you accept.';
+      (st.host || 'your AI provider') + (aiCanWrite()
+        ? '. Nothing changes until you accept.'
+        : '. Read only: AI suggests, and you make every change yourself.');
   }
 
   /*
@@ -3039,6 +3272,10 @@
 
   function acceptSuggestion(s) {
     if (state.suggestions.indexOf(s) === -1) return false;
+    if (!aiCanWrite()) {
+      flash('AI is set to read only \u2014 copy the suggestion and make the change yourself');
+      return false;
+    }
     if (isStale(s)) {
       flash('That paragraph has changed since — dismiss this and ask again');
       renderReview();
@@ -3048,11 +3285,11 @@
     for (var i = 0; i < s.regions.length; i++) {
       var r = s.regions[i];
       if (s.after[i] === r.current) continue;
-      changes.push({ region: r, before: r.current, after: s.after[i], aiBefore: !!r.ai, byBefore: r.by });
+      changes.push(multiChange(r, s.after[i]));
     }
     state.suggestions.splice(state.suggestions.indexOf(s), 1);
     if (changes.length) {
-      var entry = { kind: 'multi', changes: changes, by: authorName() };
+      var entry = { kind: 'multi', changes: changes, by: authorName(), model: aiModelName() };
       pushHistory(entry);
       applyMulti(entry, true);
     }
@@ -3071,6 +3308,7 @@
   }
 
   function acceptAll() {
+    if (!aiCanWrite()) return 0;
     var n = 0;
     state.suggestions.slice().forEach(function (s) {
       if (!isStale(s) && acceptSuggestion(s)) n++;
@@ -3093,15 +3331,17 @@
     if (!state.assist || state.assist.review.hidden) return;
     var box = state.assist.review;
     var list = state.suggestions;
+    var write = aiCanWrite();
     box.textContent = '';
 
     var head = doc().createElement('div');
     head.className = 'c-head';
     var title = doc().createElement('strong');
-    title.textContent = list.length ? 'AI suggestions (' + list.length + ')' : 'No suggestions waiting';
+    title.textContent = list.length ? 'AI suggestions (' + list.length + ')'
+      : state.explanation ? 'AI' : 'No suggestions waiting';
     var tools = doc().createElement('span');
     tools.className = 'r-tools';
-    if (list.length > 1) {
+    if (write && list.length > 1) {
       var all = doc().createElement('button');
       all.className = 'pill primary';
       all.textContent = 'Accept all';
@@ -3120,10 +3360,15 @@
 
     var note = doc().createElement('div');
     note.className = 'c-note';
-    note.textContent = list.length
-      ? 'Nothing changes until you accept. Accepting is one undo step, and the list of changes marks it as AI-suggested.'
-      : 'Ask for a rewrite or a proofread from the ✦ AI button.';
+    note.textContent = !list.length
+      ? (state.explanation ? 'An explanation changes nothing in the document.'
+                           : 'Ask for a rewrite or a proofread from the \u2726 AI button.')
+      : write
+        ? 'Nothing changes until you accept. Accepting is one undo step, and the list of changes names AI as the author.'
+        : 'AI is set to read only, so these are advice. Copy a suggestion and make the change yourself if you agree.';
     box.appendChild(note);
+
+    if (state.explanation) box.appendChild(explanationItem(state.explanation));
 
     list.forEach(function (s) {
       var stale = isStale(s);
@@ -3170,12 +3415,21 @@
       var actions = doc().createElement('div');
       actions.className = 'r-tools';
       var accept = doc().createElement('button');
-      accept.className = 'pill primary';
-      accept.textContent = 'Accept';
-      accept.disabled = stale;
-      accept.addEventListener('click', function () {
-        if (acceptSuggestion(s)) flash('Applied — Ctrl/Cmd+Z undoes it');
-      });
+      if (write) {
+        accept.className = 'pill primary';
+        accept.textContent = 'Accept';
+        accept.disabled = stale;
+        accept.addEventListener('click', function () {
+          if (acceptSuggestion(s)) flash('Applied — Ctrl/Cmd+Z undoes it');
+        });
+      } else {
+        accept.className = 'pill';
+        accept.textContent = 'Copy';
+        accept.title = 'Copy the suggested wording, to make the change yourself';
+        accept.addEventListener('click', function () {
+          copyText(visible(s.after.join('')).replace(/ \u21b5 /g, '\n'), 'Copied the suggestion');
+        });
+      }
       var dismiss = doc().createElement('button');
       dismiss.className = 'pill';
       dismiss.textContent = 'Dismiss';
@@ -3186,6 +3440,110 @@
 
       box.appendChild(item);
     });
+  }
+
+  function explanationItem(ex) {
+    var item = doc().createElement('div');
+    item.className = 's-item explain';
+
+    var top = doc().createElement('div');
+    top.className = 's-head';
+    var what = doc().createElement('span');
+    what.className = 's-what';
+    what.textContent = 'Explained: \u201c' + ex.quote.slice(0, 60) + (ex.quote.length > 60 ? '\u2026' : '') + '\u201d';
+    top.appendChild(what);
+    item.appendChild(top);
+
+    var body = doc().createElement('div');
+    body.className = 's-explain';
+    body.textContent = ex.text;
+    item.appendChild(body);
+
+    var actions = doc().createElement('div');
+    actions.className = 'r-tools';
+    var keep = doc().createElement('button');
+    keep.className = 'pill';
+    keep.textContent = 'Save as comment';
+    keep.title = 'Keep this as a comment on the paragraph, signed as an AI draft';
+    keep.addEventListener('click', function () { saveExplanation(); });
+    var copy = doc().createElement('button');
+    copy.className = 'pill';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', function () { copyText(ex.text, 'Copied the explanation'); });
+    var dismiss = doc().createElement('button');
+    dismiss.className = 'pill';
+    dismiss.textContent = 'Dismiss';
+    dismiss.addEventListener('click', function () {
+      state.explanation = null;
+      renderReview();
+    });
+    actions.appendChild(keep);
+    actions.appendChild(copy);
+    actions.appendChild(dismiss);
+    item.appendChild(actions);
+    return item;
+  }
+
+  function copyText(text, done) {
+    var clip = window.navigator && navigator.clipboard;
+    if (!clip || !clip.writeText) { flash('This browser will not let VibeRevise copy'); return; }
+    clip.writeText(text).then(function () { flash(done); },
+      function () { flash('The browser refused to copy \u2014 select the text and copy it instead'); });
+  }
+
+  // The words selected inside `block`, if any.
+  function selectionIn(block) {
+    var sel = doc().getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return '';
+    var range = sel.getRangeAt(0);
+    if (!block.contains(range.startContainer) || !block.contains(range.endContainer)) return '';
+    return sel.toString().trim();
+  }
+
+  /*
+   * Explain the selection, or the paragraph the caret is in. Advice only: it
+   * changes nothing, in either mode, and it is kept until dismissed or saved
+   * as a comment.
+   */
+  function aiExplain(target) {
+    target = target || aiTarget();
+    if (!target) { flash('Click into a paragraph, or select some words, first'); return Promise.resolve(null); }
+    var text = AI.toModel(textOfRegions(target.regions)).trim();
+    if (!text) { flash('That paragraph is empty'); return Promise.resolve(null); }
+    var selection = selectionIn(target.block);
+    var what = describeTag(target.block.localName || 'block');
+
+    return runAI(selection ? 'Asking AI to explain the selection\u2026' : 'Asking AI to explain this ' + what + '\u2026',
+      function (job) {
+        var req = AI.explainRequest({
+          text: text,
+          selection: selection,
+          before: neighbourText(target.block, -1),
+          after: neighbourText(target.block, 1),
+        });
+        return askAI(req, job).then(function (res) {
+          if (res.cancelled) return null;
+          if (!res.ok) { flash('AI: ' + res.message); return null; }
+          var answer = typeof res.data.explanation === 'string' ? res.data.explanation.trim() : '';
+          if (!answer) { flash('AI had nothing to say about it'); return null; }
+          state.explanation = { block: target.block, quote: selection || text, text: answer };
+          setAIOpen(false);
+          openReview();
+          return state.explanation;
+        });
+      });
+  }
+
+  function saveExplanation() {
+    var ex = state.explanation;
+    if (!ex) return null;
+    if (!ex.block.isConnected) { flash('That paragraph is no longer on the page'); return null; }
+    var region = addCommentTo(ex.block, { text: ex.text, author: aiAuthor() });
+    if (!region) return null;
+    state.explanation = null;
+    renderReview();
+    flash('Saved as a comment \u2014 edit it or delete it before saving the file');
+    return region;
   }
 
   // The host says its AI settings changed: a key added in another tab, say.
@@ -3216,6 +3574,7 @@
    */
   function collectEdits() {
     var edits = [];
+    var trees = new Set();
     var islands = doc().querySelectorAll('[' + Islands.ATTR + ']');
 
     for (var i = 0; i < islands.length; i++) {
@@ -3223,8 +3582,16 @@
       if (!region || region.removed) continue;
 
       // A cell does not emit on its own: its tree emits all of them together,
-      // below, so a half-filled table still writes every cell it needs.
-      if (region.kind === 'cell') continue;
+      // at its first cell, so a half-filled table still writes every cell it
+      // needs, in document order with any block added beside it.
+      if (region.kind === 'cell') {
+        if (!trees.has(region.tree)) {
+          trees.add(region.tree);
+          var te = treeEdit(region.tree);
+          if (te) edits.push(te);
+        }
+        continue;
+      }
 
       if (region.kind === 'insert') {
         // An added block nobody typed into is not written at all.
@@ -3247,7 +3614,6 @@
       });
     }
 
-    collectStructureEdits(edits);
     collectCommentEdits(edits);
     return edits;
   }
@@ -3257,28 +3623,20 @@
    * rendered from the cells the user typed into. One nobody typed anything into
    * is not written at all, on the same grounds as an added block left empty.
    */
-  function collectStructureEdits(edits) {
-    var newline = Blocks.newlineOf(state.source);
-
-    function textFor(island) {
-      var cell = state.byIsland.get(island);
-      return cell ? serialise(cell.current, cell.span) : '';
-    }
-
-    for (var i = 0; i < state.trees.length; i++) {
-      var tree = state.trees[i];
-      if (tree.removed || !treeHasText(tree)) continue;
-
-      edits.push({
-        start: tree.anchor.offset,
-        end: tree.anchor.offset,
-        replacement: tree.anchor.before + Structures.markup(tree.element, {
-          newline: newline,
-          indent: tree.indent,
-          text: textFor,
-        }) + tree.anchor.after,
-      });
-    }
+  function treeEdit(tree) {
+    if (tree.removed || !treeHasText(tree)) return null;
+    return {
+      start: tree.anchor.offset,
+      end: tree.anchor.offset,
+      replacement: tree.anchor.before + Structures.markup(tree.element, {
+        newline: Blocks.newlineOf(state.source),
+        indent: tree.indent,
+        text: function (island) {
+          var cell = state.byIsland.get(island);
+          return cell ? serialise(cell.current, cell.span) : '';
+        },
+      }) + tree.anchor.after,
+    };
   }
 
   /*
@@ -3603,6 +3961,7 @@
       if (state.aiJob) state.aiJob.cancelled = true;
       state.aiJob = null;
       state.suggestions = [];
+      state.explanation = null;
       doc().documentElement.removeAttribute(MODE_ATTR);
       removeListeners();
       teardownRegions();
@@ -3759,6 +4118,8 @@
     setAuthor: setAuthor,
     changes: collectChanges,
     openChanges: openChanges,
+    revertChange: revertChange,
+    changeHeading: changeHeading,
     atEndOfBlock: atEndOfBlock,
     addCommentTo: addCommentTo,
     removeComment: removeComment,
@@ -3780,6 +4141,11 @@
     },
     aiProofread: aiProofread,
     aiReplyTo: aiReplyTo,
+    aiExplain: function (block) {
+      return aiExplain(block ? { block: block, regions: runsOf(block) } : null);
+    },
+    explanation: function () { return state.explanation; },
+    saveExplanation: saveExplanation,
     aiSettingsChanged: aiSettingsChanged,
     suggestions: function () { return state.suggestions.slice(); },
     acceptSuggestion: acceptSuggestion,

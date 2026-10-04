@@ -96,7 +96,17 @@ offering it from there — the controls are already beside the block, so there i
 no question of where the new thing goes.
 
 **Insert** in the status bar offers the same list, and puts it after whatever
-you were last typing in.
+you were last typing in. Two places are different:
+
+- **Part-way through a paragraph**, Insert splits the paragraph at the cursor:
+  the words before it stay, the list (or table, or heading) goes next, and the
+  words after it carry on in a new paragraph like the first. It is one undo
+  step. The words after the cursor have to be plain words, so it will not split
+  a paragraph inside or before its bold, italic or links; it says so instead.
+- **In a table cell**, a list, heading or paragraph goes *inside* the cell,
+  under its text. Beside the cell would make a browser draw it as one more
+  cell, and would put a list between two cells in the file. A table asked for
+  in a cell goes after the whole table.
 
 Each one is **copied from the nearest one already in the document**. A table
 takes that table's `class` and its column count, and gets a header row only if
@@ -130,6 +140,13 @@ it: it is still somebody else's comment.
 Click the change count in the bar — "2 changes" — for the list of everything
 Save would write, a paragraph per row, with who made each change and a
 word-by-word view of it.
+
+Each row has its own **Undo**, which takes back that one change and leaves
+every other change alone: an edited paragraph goes back to what the file says,
+an added block or comment comes back out, and a deleted comment comes back in
+its original words. Ctrl/Cmd+Z only goes back in order, so this is how you
+drop the third edit of ten. Ctrl/Cmd+Z straight afterwards brings the change
+back.
 
 Names are self-declared. There is no sign-in, so anyone can type any name.
 
@@ -196,6 +213,10 @@ dialog.
 
 Then, from the **✦ AI** button on the status bar:
 
+- **Explain** the paragraph you are in, or the words you have selected: what
+  it means, any jargon, and anything a reviewer should check. It changes
+  nothing. You can **Save as comment** to keep it, signed
+  `Your name (AI draft)`, or copy it, or dismiss it.
 - **Rewrite the paragraph you are in.** Pick *Tighten*, *Fix grammar*,
   *Plainer* or *More formal*, or type your own instruction.
 - **Proofread the whole document.** Spelling, grammar, punctuation and typos
@@ -206,10 +227,21 @@ Then, from the **✦ AI** button on the status bar:
   thread asks for a change to the passage, the change comes too, as a
   suggestion.
 
+**AI never changes the document on its own.** In its settings you choose what
+it may do:
+
+| | Explain, review, reply to comments, suggest edits | Apply a suggested edit |
+| --- | --- | --- |
+| **Read** (the default) | Yes | No. A suggestion has **Copy** instead of Accept, and you make the change yourself. |
+| **Read and write** | Yes | Only when you press **Accept**, one at a time or "Accept all". |
+
 Every answer is a **suggestion**. It shows as a before-and-after of the
-paragraph with **Accept** and **Dismiss**, and nothing changes until you accept.
-Accepting is a single undo step, and the list of changes marks it *AI
-suggested*. A suggestion goes stale if you edit that paragraph before
+paragraph with **Accept** (or **Copy**) and **Dismiss**, and nothing changes
+until you accept.
+Accepting is a single undo step. The list of changes names AI as the author,
+with the model and who accepted it: *AI (claude-opus-5-5) · edited · accepted
+by Cara*. A paragraph you had edited too, before or after, reads *Cara and AI
+(claude-opus-5-5) · edited*. A suggestion goes stale if you edit that paragraph before
 accepting it, and a stale one cannot be applied: putting an answer onto words
 the model never saw would be guessing.
 

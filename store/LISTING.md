@@ -86,7 +86,7 @@ PRIVACY
 
 VibeRevise has no servers and collects nothing: no analytics, no accounts. It talks to the server your own document came from, to read it and, if you ask, save it back.
 
-AI is optional and off by default. Add an API key for Claude, OpenAI, OpenRouter, Gemini, or a model on your own computer, and you can ask for a rewrite, a proofread or a reply to a comment. Only then, and only when you press the button, are the words of those paragraphs sent, straight to the service you chose. Every answer is a suggestion you accept or dismiss. The markup is never touched.
+AI is optional and off by default. Add an API key for Claude, OpenAI, OpenRouter, Gemini, or a model on your own computer, and you can ask it to explain a passage, rewrite a paragraph, proofread the document or reply to a comment. Only then, and only when you press the button, are the words of those paragraphs sent, straight to the service you chose. AI never changes the document on its own: on Read, the default, it only advises and you make every change; on Read and write, a suggestion is applied only when you press Accept. The markup is never touched.
 
 It stores your name, your comments setting and, if you add them, your AI provider, model and key, all in your browser only. Your key is never visible to the pages you edit.
 ```

@@ -178,7 +178,7 @@ async function aiStatus() {
     return { configured: false, host, problem: 'VibeRevise has not been allowed to reach ' + host +
              ' yet. Open AI settings and press Save to allow it.' };
   }
-  return { configured: true, label: AI.describe(cfg), host };
+  return { configured: true, label: AI.describe(cfg), host, access: cfg.access };
 }
 
 async function aiComplete(request) {

@@ -127,6 +127,17 @@
     <input id="set-ai-key" type="password" spellcheck="false" autocapitalize="off"
            autocomplete="off" placeholder="Paste your key">
     <p class="hint" id="set-ai-hint"></p>
+
+    <fieldset class="ai-access">
+      <legend>What AI may do</legend>
+      <label class="choice"><input type="radio" name="ai-access" id="set-ai-read" value="read" checked>
+        <span><b>Read</b> — explains, reviews, replies to comments and suggests
+        edits. You make every change yourself.</span></label>
+      <label class="choice"><input type="radio" name="ai-access" id="set-ai-write" value="write">
+        <span><b>Read and write</b> — its suggested edits also get an
+        <b>Accept</b> button. Nothing changes until you press it.</span></label>
+    </fieldset>
+
     <p class="hint">Kept in this browser’s storage for this app only — not synced,
        never sent anywhere but the address above. The service must accept
        requests from a web page; Anthropic, OpenAI, OpenRouter and Gemini do, and

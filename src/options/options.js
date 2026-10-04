@@ -26,6 +26,8 @@ const els = {
   test: $('test'),
   forget: $('forget'),
   status: $('status'),
+  write: $('access-write'),
+  read: $('access-read'),
 };
 
 let saved = null;     // the configuration as stored, for comparing and revoking
@@ -62,6 +64,19 @@ function applyPreset(next) {
 }
 els.provider.addEventListener('change', () => applyPreset(els.provider.value));
 
+// Read or read-and-write needs no new permission, so it saves the moment it
+// changes, without the Save button's prompt.
+[els.read, els.write].forEach((radio) => radio.addEventListener('change', async () => {
+  if (!saved) return;
+  saved = Object.assign({}, saved, { access: els.write.checked ? 'write' : 'read' });
+  await chrome.storage.local.set({
+    ai: { provider: saved.provider, baseUrl: saved.baseUrl, model: saved.model, apiKey: saved.apiKey, access: saved.access },
+  });
+  say(saved.access === 'write'
+    ? 'Saved: AI suggestions can be accepted with one click.'
+    : 'Saved: AI only advises. You make every change yourself.', 'good');
+}));
+
 els.showKey.addEventListener('click', () => {
   const show = els.key.type === 'password';
   els.key.type = show ? 'text' : 'password';
@@ -75,6 +90,7 @@ function readForm() {
     baseUrl: els.baseUrl.value,
     model: els.model.value,
     apiKey: els.key.value,
+    access: els.write.checked ? 'write' : 'read',
   });
 }
 
@@ -87,6 +103,8 @@ async function load() {
   els.baseUrl.value = cfg.baseUrl;
   els.model.value = cfg.model;
   els.key.value = cfg.apiKey;
+  els.write.checked = cfg.access === 'write';
+  els.read.checked = !els.write.checked;
   applyPreset(cfg.provider);
   els.test.disabled = !saved;
   els.forget.disabled = !saved;
@@ -126,7 +144,7 @@ els.form.addEventListener('submit', (e) => {
     }
     const before = saved ? AI.permissionPattern(saved) : null;
     await chrome.storage.local.set({
-      ai: { provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: cfg.apiKey },
+      ai: { provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: cfg.apiKey, access: cfg.access },
     });
     if (before && before !== pattern) await revoke(before);
     saved = cfg;

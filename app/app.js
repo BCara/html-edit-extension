@@ -114,6 +114,7 @@ function writeAIConfig(cfg) {
     if (cfg) {
       localStorage.setItem(AI_KEY, JSON.stringify({
         provider: cfg.provider, baseUrl: cfg.baseUrl, model: cfg.model, apiKey: cfg.apiKey,
+        access: cfg.access,
       }));
     } else {
       localStorage.removeItem(AI_KEY);
@@ -131,7 +132,7 @@ var AI_HOST = {
     var host = '';
     try { host = new URL(cfg.baseUrl).host; } catch (e) { /* reported by problem */ }
     return Promise.resolve(problem ? { configured: false, problem: problem, host: host }
-                                   : { configured: true, label: AI.describe(cfg), host: host });
+                                   : { configured: true, label: AI.describe(cfg), host: host, access: cfg.access });
   },
   complete: function (request) {
     var cfg = readAIConfig();
@@ -691,6 +692,7 @@ var aiEls = {
   model: document.getElementById('set-ai-model'),
   key: document.getElementById('set-ai-key'),
   hint: document.getElementById('set-ai-hint'),
+  write: document.getElementById('set-ai-write'),
 };
 var aiLastProvider = 'anthropic';
 
@@ -716,6 +718,8 @@ function fillAIForm(cfg) {
   aiEls.url.value = cfg.baseUrl;
   aiEls.model.value = cfg.model;
   aiEls.key.value = cfg.apiKey;
+  aiEls.write.checked = cfg.access === 'write';
+  document.getElementById('set-ai-read').checked = cfg.access !== 'write';
   applyAIPreset(cfg.provider);
 }
 
@@ -723,6 +727,7 @@ function readAIForm() {
   return AI.normaliseConfig({
     provider: aiEls.provider.value, baseUrl: aiEls.url.value,
     model: aiEls.model.value, apiKey: aiEls.key.value,
+    access: aiEls.write.checked ? 'write' : 'read',
   });
 }
 

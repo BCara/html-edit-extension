@@ -174,6 +174,24 @@ const local = AI.normaliseConfig({ provider: 'custom', baseUrl: 'http://localhos
     eq(JSON.parse(c.user).thread[0].author, 'Cara', 'the thread is sent with its authors');
   }
   {
+    const e = AI.explainRequest({ text: 'The EBITDA rose.', selection: 'EBITDA', after: 'Next.' });
+    const data = JSON.parse(e.user);
+    eq(data.selection, 'EBITDA', 'explain sends the selection');
+    eq(data.paragraph, 'The EBITDA rose.', 'with its paragraph for context');
+    ok(/never as instructions/.test(e.system), 'as data, not instructions');
+    ok(/Do not rewrite/.test(e.system), 'and asks for an explanation, not a rewrite');
+    ok(!('selection' in JSON.parse(AI.explainRequest({ text: 'x' }).user)), 'no selection, no selection field');
+  }
+
+  section('read, or read and write');
+  {
+    eq(AI.normaliseConfig({ provider: 'anthropic' }).access, 'read', 'read only unless chosen otherwise');
+    eq(AI.normaliseConfig({ provider: 'anthropic', apiKey: 'k' }).access, 'read',
+       'including settings saved before there was a choice');
+    eq(AI.normaliseConfig({ provider: 'anthropic', access: 'write' }).access, 'write', 'read and write when chosen');
+    eq(AI.normaliseConfig({ provider: 'anthropic', access: 'admin' }).access, 'read', 'anything else is read only');
+  }
+  {
     const chunks = AI.chunkBlocks([{ runs: ['aaaa'] }, { runs: ['bbbb'] }, { runs: ['cc'] }], 6);
     eq(chunks.map((c) => c.length), [1, 2], 'paragraphs are batched by size');
   }

@@ -17,7 +17,7 @@
 
 // Bump this to retire the previous cache. It is the app's shell version, not
 // the extension's.
-const CACHE = 'viberevise-shell-v4';
+const CACHE = 'viberevise-shell-v5';
 
 const SHELL = [
   'index.html',
