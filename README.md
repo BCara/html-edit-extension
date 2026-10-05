@@ -178,6 +178,7 @@ the `×` on its card; a comment left empty is not written at all.
 
 | Key | |
 | --- | --- |
+| `Ctrl`/`Cmd` + `Shift` + `S` | Save as… somewhere else, and keep saving there |
 | `Ctrl`/`Cmd` + `S` | Save, from anywhere: the document, a comment, a box on the bar, while paused, or after **Done** with changes unsaved |
 | `Ctrl`/`Cmd` + `Z` | Undo (including undoing an added block) |
 | `Ctrl`/`Cmd` + `Shift` + `Z` (or `Ctrl` + `Y`) | Redo |
@@ -350,11 +351,17 @@ change someone else made in the meantime, and the server keeps timestamped
 backups. See [server/README.md](server/README.md) — it is one dependency-free
 file to drop into an Express app.
 
-Otherwise Save writes a file. Where the browser allows it, VibeRevise asks once
-where to put it — pre-filled with the document's own name — and every save after
-that goes to the same file with no dialog. Choosing the original file is how you
-overwrite it, and that is your explicit choice rather than something that
-happens quietly.
+Otherwise Save writes a file:
+
+- **If you chose the file** when VibeRevise asked to read it, Save writes over
+  that file. The first time, Chrome asks once whether VibeRevise may save
+  changes to it; every save after that goes straight to it.
+- **If VibeRevise read the file itself**, there is no file to write through
+  yet, so the first Save asks where, pre-filled with the document's own name,
+  and every save after that goes to the same file with no dialog. Choosing
+  the original file is how you overwrite it.
+- **Save as…** (in the ⋯ menu, or `Ctrl`/`Cmd` + `Shift` + `S`) chooses
+  somewhere else, and Save keeps writing there afterwards.
 
 A copy of a hosted page has no name of its own, so one is built from the
 address: `example.com/docs/getting-started` saves as

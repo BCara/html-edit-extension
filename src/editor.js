@@ -1310,7 +1310,7 @@
     if (state.active && !state.paused) return;          // onKeyDown has it
     if (!state.active && !unsavedCount()) return;      // nothing of ours to save
     e.preventDefault();
-    save();
+    if (e.shiftKey) saveAs(); else save();
   }
 
   function onKeyDown(e) {
@@ -1365,7 +1365,7 @@
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
     var key = (e.key || '').toLowerCase();
 
-    if (key === 's') { e.preventDefault(); save(); return; }
+    if (key === 's') { e.preventDefault(); if (e.shiftKey) saveAs(); else save(); return; }
     if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
     if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); redo(); return; }
 
@@ -2343,6 +2343,7 @@
             'ways, and rewrites every comment next time you save.</div>' +
           '<div class="p-sep"></div>' +
           '<button class="p-changes">Show changes</button>' +
+          '<button class="p-changes p-saveas" title="Ctrl/Cmd+Shift+S">Save as\u2026</button>' +
         '</div>' +
         (state.ai ? AI_MARKUP : '') +
         '<button class="save primary" disabled>Save</button>' +
@@ -2370,6 +2371,7 @@
       authorInput: shadow.querySelector('.p-input'),
       authorSave: shadow.querySelector('.p-save'),
       changesBtn: shadow.querySelector('.p-changes'),
+      saveAsBtn: shadow.querySelector('.p-saveas'),
       info: shadow.querySelector('.p-info'),
       infoRows: shadow.querySelectorAll('[data-info]'),
       showComments: shadow.querySelector('.p-show-comments'),
@@ -2408,6 +2410,7 @@
     ui.undo.addEventListener('mousedown', function (e) { e.preventDefault(); undo(); });
     ui.redo.addEventListener('mousedown', function (e) { e.preventDefault(); redo(); });
     ui.save.addEventListener('click', function () { save(); });
+    ui.saveAsBtn.addEventListener('click', function () { setMoreOpen(false); saveAs(); });
     ui.done.addEventListener('click', function () { setActive(false); });
     ui.pause.addEventListener('click', function () { setPaused(!state.paused); });
 
@@ -2430,7 +2433,7 @@
       setMoreOpen(false);
     });
     ui.authorInput.addEventListener('keydown', function (e) {
-      if (isSaveKey(e)) { e.preventDefault(); e.stopPropagation(); save(); return; }
+      if (isSaveKey(e)) { e.preventDefault(); e.stopPropagation(); if (e.shiftKey) saveAs(); else save(); return; }
       if (e.key === 'Enter') { e.preventDefault(); ui.authorSave.click(); }
       e.stopPropagation();       // typing a name is not an editing shortcut
     });
@@ -3189,7 +3192,7 @@
     }
     shadow.querySelector('.ai-go').addEventListener('click', go);
     ui.aiInstruction.addEventListener('keydown', function (e) {
-      if (isSaveKey(e)) { e.preventDefault(); e.stopPropagation(); save(); return; }
+      if (isSaveKey(e)) { e.preventDefault(); e.stopPropagation(); if (e.shiftKey) saveAs(); else save(); return; }
       if (e.key === 'Enter') { e.preventDefault(); go(); }
       e.stopPropagation();        // typing an instruction is not an editing shortcut
     });
@@ -4164,8 +4167,8 @@
    * not that: downloading a file somebody just declined to save would be the
    * opposite of what they asked for.
    */
-  function hostSave(text) {
-    return Promise.resolve(state.saveFile(text)).then(function (res) {
+  function hostSave(text, opts) {
+    return Promise.resolve(state.saveFile(text, opts)).then(function (res) {
       if (!res || res.ok || !res.fallback) return res;
       return requestDownload(text).then(function (dl) {
         if (!dl || !dl.ok) return dl;
@@ -4174,7 +4177,13 @@
     });
   }
 
-  function save() {
+  // Save as: choose somewhere new to write, and keep saving there after.
+  // Where the host cannot choose (a document saved back to its server, or a
+  // download), it is a download, whose dialog always asks where.
+  function saveAs() { return save({ as: true }); }
+
+  function save(opts) {
+    opts = opts || {};
     if (!state.regions.length) { flash('Nothing to save'); return Promise.resolve(); }
 
     flushCommentEdit();
@@ -4198,10 +4207,10 @@
     var skipped = emptyAddedCount() + emptyCommentCount();
     var removedAtSave = state.removals.map(function (x) { return { item: x, active: x.active }; });
 
-    var toServer = !!(state.served && state.served.canPut);
+    var toServer = !!(state.served && state.served.canPut) && !opts.as;
     flash(state.saveFile ? 'Saving…' : (toServer ? 'Saving to the server…' : 'Saving…'));
 
-    var attempt = state.saveFile ? hostSave(text) : toServer
+    var attempt = state.saveFile ? hostSave(text, opts) : toServer
       ? saveToServer(text).then(function (res) {
           if (res.ok || res.conflict) return res;
           // The server said no. Do not lose the edits over it — fall back to
@@ -4886,6 +4895,7 @@
     isActive: function () { return state.active; },
     status: status,
     save: save,
+    saveAs: saveAs,
     undo: undo,
     redo: redo,
   };

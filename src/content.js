@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.15.1';
+  var VERSION = '0.15.2';
   var REQUIRED = [
     'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
     'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',
@@ -302,7 +302,7 @@
         return res.text;
       }
       state.readError = res;
-      console.log('[VibeRevise] service worker could not read the file:', res);
+      console.log('[VibeRevise] service worker could not read the file: ' + JSON.stringify(res));
 
       return fetch(url).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -367,14 +367,11 @@
     // does: Save asks once where to put it, and every save after that goes to
     // the same file, which is what makes editing-then-handing-it-on bearable.
     if (isServed() && !isCopy()) return Promise.resolve(null);
-    if (!state.handle) return Promise.resolve(Prompt.canHandle ? writeFn() : null);
-    return Prompt.canWrite(state.handle).then(function (allowed) {
-      if (!allowed) {
-        console.log('[VibeRevise] the file handle is read-only; Save will ask for one');
-        state.handle = null;
-      }
-      return writeFn();
-    });
+    // Write access to a chosen file is asked for at the first Save, not now.
+    // Chrome only grants it in answer to a click, and opening the file is
+    // no longer that click by the time we get here: asking now was refused
+    // every time, and the handle was thrown away for it.
+    return Promise.resolve(state.handle || Prompt.canHandle ? writeFn() : null);
   }
 
   /*
@@ -388,8 +385,10 @@
    * this one is the LAST one, because the handle is kept for the session.
    */
   function writeFn() {
-    return function (text) {
-      return ensureHandle().then(function (handle) {
+    // opts.as: Save as — choose somewhere new, and keep saving there after.
+    return function (text, opts) {
+      var where = opts && opts.as ? askForHandle() : ensureHandle();
+      return where.then(function (handle) {
         if (!handle) {
           // Cancelled. Not a failure, and deliberately not a fallback: nobody
           // who just dismissed a save dialog wants the file downloaded anyway.
@@ -548,6 +547,12 @@
         // is state.handle, and that may only be answered at the first save.
         state.canWriteFile = !!saveFile;
         state.ready = true;
+        // Someone who has just chosen the file wants to edit it: no second
+        // trip to the popup for Start editing.
+        if (state.readVia === 'file picker' && !Editor.isActive()) {
+          state.autoStarted = true;
+          Editor.setActive(true);
+        }
         console.log('[VibeRevise] read via ' + state.readVia + ' —',
                     map.stats.editable, 'editable regions', map.stats,
                     state.handle ? '— Save writes over the file'
@@ -593,7 +598,11 @@
     },
 
     'vibeRevise:toggle': function (msg) {
+      var started = state.autoStarted;
       return ensureReady().then(function () {
+        // Choosing the file just started editing; the press that led to it
+        // was asking for exactly that, so it must not switch it off again.
+        if (state.autoStarted && !started) return report();
         Editor.setActive(typeof msg.active === 'boolean' ? msg.active : !Editor.isActive());
         return report();
       });

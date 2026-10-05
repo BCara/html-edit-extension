@@ -234,6 +234,21 @@ async function run() {
     eq(saves, 2, 'and each one saves');
   }
 
+  heading('Save as asks the host for somewhere new');
+  {
+    const store = memoryStore();
+    const calls = [];
+    open(V1, store, (text, opts) => { calls.push(!!(opts && opts.as)); return Promise.resolve({ ok: true, where: 'Saved' }); });
+    await settle();
+    type(island('#a'), ' y');
+    await E.save();
+    await E.saveAs();
+    const ev = new KeyboardEvent('keydown', { key: 'S', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true });
+    D.activeElement.dispatchEvent(ev);
+    await settle();
+    eq(calls.join(), 'false,true,true', 'Save writes where it was, Save as and Ctrl/Cmd+Shift+S ask for somewhere new');
+  }
+
   heading('starting fresh forgets it');
   {
     const store = memoryStore();

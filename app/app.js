@@ -364,7 +364,27 @@ function downloadFile(text) {
  * Handed to the editor as options.saveFile, so Save in its own bar comes here
  * rather than going near the extension's download plumbing.
  */
-function saveFile(text) {
+// Save as: a new place to write, which Save then keeps using. Without a save
+// picker (Firefox, Safari, phones) it is a download, which asks where anyway.
+function saveFileAs(text) {
+  if (typeof window.showSaveFilePicker !== 'function') return Promise.resolve(downloadFile(text));
+  return window.showSaveFilePicker({
+    suggestedName: current.name,
+    startIn: current.handle || undefined,
+    types: [{ description: 'HTML document', accept: { 'text/html': ['.html', '.htm'] } }],
+  }).then(function (handle) {
+    current.handle = handle;
+    current.name = handle.name;
+    els.filename.textContent = current.name;
+    return writeThroughHandle(text);
+  }, function (err) {
+    if (err && err.name === 'AbortError') return { ok: false, message: 'Save cancelled' };
+    return downloadFile(text);
+  });
+}
+
+function saveFile(text, opts) {
+  if (opts && opts.as) return saveFileAs(text);
   if (current.handle) {
     return writeThroughHandle(text).catch(function (err) {
       // Permission can lapse, or the file can have gone. Never lose the edits
@@ -517,7 +537,8 @@ function openNetwork(url) {
 window.addEventListener('keydown', function (e) {
   if (!(e.metaKey || e.ctrlKey) || e.altKey || (e.key || '').toLowerCase() !== 's') return;
   e.preventDefault();
-  if (current.source && window.VibeReviseEditor) window.VibeReviseEditor.save();
+  if (!current.source || !window.VibeReviseEditor) return;
+  if (e.shiftKey) window.VibeReviseEditor.saveAs(); else window.VibeReviseEditor.save();
 });
 
 function watchUnsaved() {

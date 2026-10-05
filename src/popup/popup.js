@@ -53,7 +53,7 @@ const READ_LABELS = {
 
 // Where Save will put it. Worth stating up front: these are different acts.
 const WRITE_LABELS = {
-  file: 'over the top of the file you chose',
+  file: 'over the file you chose — Chrome asks once to allow it, on your first save',
   'file-ask': 'over the file — it asks once where, on your first save',
   server: 'back to the server, in place',
   download: 'a download you place yourself',
