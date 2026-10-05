@@ -199,6 +199,41 @@ async function run() {
     eq(E.conflicts().length, 0, 'with no clashes, since the other tool left those paragraphs alone');
   }
 
+  heading('a removed paragraph stays removed through a reload');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    E.removeFileBlock(D.getElementById('d'));
+    await new Promise((r) => setTimeout(r, 800));
+    open(V2, store);
+    await settle();
+    E.resume(true);
+    ok(E.preview().indexOf('Costs held steady') === -1, 'it is taken out of the other tool\u2019s version too');
+    ok(E.changes().some((c) => c.kind === 'removed'), 'and listed as a change');
+  }
+
+  heading('Ctrl/Cmd+S saves, even while paused');
+  {
+    const store = memoryStore();
+    let saves = 0;
+    open(V1, store, () => { saves++; return Promise.resolve({ ok: true, where: 'Saved' }); });
+    await settle();
+    type(island('#a'), ' x');
+    const key = () => {
+      const ev = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true });
+      D.activeElement.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    };
+    ok(key(), 'in the document, the browser\u2019s own Save is not used');
+    await settle();
+    E.setPaused(true);
+    type(island('#a'), '');
+    ok(key(), 'and while paused');
+    await settle();
+    eq(saves, 2, 'and each one saves');
+  }
+
   heading('starting fresh forgets it');
   {
     const store = memoryStore();

@@ -157,6 +157,7 @@
     conflicts: [],        // edits that could not go back on, because the file changed there
     outside: [],          // what changed in the file outside VibeRevise
     earlier: [],          // changes saved before the last reload, as rows to show
+    removals: [],         // emptied blocks from the file, taken out with Delete
   }; }
   var state = makeState();
 
@@ -346,18 +347,19 @@
     var n = 0;
     for (var i = 0; i < state.regions.length; i++) {
       var r = state.regions[i];
-      if (!r.removed && r.current !== r.original) n++;
+      if (!r.removed && r.current !== r.original && r.island.isConnected) n++;
     }
-    return n + commentChangedCount();
+    return n + commentChangedCount() + state.removals.filter(function (x) { return x.active; }).length;
   }
 
   function unsavedCount() {
     var n = 0;
     for (var i = 0; i < state.regions.length; i++) {
       var r = state.regions[i];
-      if (!r.removed && r.current !== r.saved) n++;
+      if (!r.removed && r.current !== r.saved && r.island.isConnected) n++;
     }
-    return n + commentUnsavedCount();
+    return n + commentUnsavedCount() +
+      state.removals.filter(function (x) { return x.active !== x.saved; }).length;
   }
 
   // Added blocks the user never typed into. They are not written to the file,
@@ -912,6 +914,8 @@
     if (entry.kind === 'group') { for (var i = entry.entries.length - 1; i >= 0; i--) undoEntry(entry.entries[i]); }
     else if (entry.kind === 'add') setAdded(entry.region, false);
     else if (entry.kind === 'remove-added') setAdded(entry.region, true);
+    else if (entry.kind === 'remove-block') setRemoval(entry.item, false);
+    else if (entry.kind === 'restore-block') setRemoval(entry.item, true);
     else if (entry.kind === 'multi') applyMulti(entry, false);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, true);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, false);
@@ -923,6 +927,8 @@
     if (entry.kind === 'group') entry.entries.forEach(redoEntry);
     else if (entry.kind === 'add') setAdded(entry.region, true);
     else if (entry.kind === 'remove-added') setAdded(entry.region, false);
+    else if (entry.kind === 'remove-block') setRemoval(entry.item, true);
+    else if (entry.kind === 'restore-block') setRemoval(entry.item, false);
     else if (entry.kind === 'multi') applyMulti(entry, true);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, false);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, true);
@@ -1105,6 +1111,125 @@
     return empty ? item : null;
   }
 
+
+  /*
+   * A block from the file that has been emptied, and Delete pressed in it.
+   *
+   * Emptying a paragraph leaves its tags in the file: <p></p>, or a heading
+   * with nothing in it, which still takes up space on the page. Once every
+   * word is gone there is nothing left to lose, so Delete takes the element
+   * out as well, as one undo step, and the list of changes says so.
+   *
+   * Only plain blocks of words: a paragraph, a heading, a list item, a quote.
+   * Not a table cell (the table would lose its shape), not a section or a
+   * div (they hold other things), and not a block with anything in it besides
+   * words and their formatting: an image is content, even with no text.
+   */
+  var REMOVABLE = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote', 'dt', 'dd', 'figcaption', 'pre'];
+  var INLINE = ['b', 'strong', 'i', 'em', 'u', 's', 'span', 'a', 'mark', 'small', 'sub', 'sup',
+                'code', 'abbr', 'cite', 'q', 'font', 'del', 'ins', 'br', 'kbd', 'var', 'time'];
+
+  function removableHere() {
+    var island = islandOf(doc().activeElement);
+    var r = island && regionOf(island);
+    if (!r || r.kind !== 'text') return null;
+    var block = Blocks.blockFor(island);
+    if (!block || REMOVABLE.indexOf(block.localName) === -1) return null;
+    var runs = runsOf(block);
+    if (!runs.length || runs.some(function (x) { return !blank(x.current); })) return null;
+
+    var what = describeTag(block.localName);
+    var all = block.getElementsByTagName('*');
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].hasAttribute(Islands.ATTR)) continue;
+      if (INLINE.indexOf(all[i].localName) === -1) {
+        return { refuse: 'This ' + what + ' has more in it than words, so VibeRevise leaves it in place' };
+      }
+    }
+    if (liveComments().some(function (c) { return c.block === block; })) {
+      return { refuse: 'This ' + what + ' has a comment on it — delete the comment first' };
+    }
+
+    // The only item in a list goes with its list, rather than leaving an
+    // empty <ul> behind.
+    var target = block;
+    var list = block.parentElement;
+    if (block.localName === 'li' && list && /^(ul|ol)$/.test(list.localName) &&
+        list.children.length === 1 && state.map.elements.get(list)) target = list;
+
+    var range = state.map.elements.get(target);
+    if (!range || !range.startTag || !range.endTag) {
+      return { refuse: 'VibeRevise cannot tell where this ' + what + ' ends in the file, so it stays' };
+    }
+    return { block: block, target: target };
+  }
+
+  function makeRemoval(target, block) {
+    var range = state.map.elements.get(target);
+    var runs = state.regions.filter(function (x) { return x.kind === 'text' && target.contains(x.island); });
+    var item = {
+      kind: 'removal',
+      element: target,
+      parent: target.parentNode,
+      next: target.nextSibling,
+      tags: { start: range.startTag.start, end: range.endTag.end },
+      cut: Comments.deleteRange(state.source, { start: range.startTag.start, end: range.endTag.end }),
+      what: target === block ? describeTag(block.localName) : 'list',
+      before: runs.map(function (x) { return x.original; }).join(''),
+      runs: runs,
+      active: false,
+      saved: false,
+      by: authorName(),
+    };
+    state.removals.push(item);
+    return item;
+  }
+
+  function removeFileBlock(target, block) {
+    var item = makeRemoval(target, block || target);
+    var land = islandBeside(target);
+    pushHistory({ kind: 'remove-block', item: item });
+    setRemoval(item, true);
+    if (land) {
+      land.focus();
+      Islands.setCaret(land, Islands.readValue(land).length);
+    }
+    flash('Removed the empty ' + item.what + ' — Ctrl/Cmd+Z brings it back');
+    return item;
+  }
+
+  function setRemoval(item, on) {
+    if (on === item.active) return;
+    if (on) {
+      item.parent = item.element.parentNode;
+      item.next = item.element.nextSibling;
+      if (item.parent) item.parent.removeChild(item.element);
+    } else if (item.parent) {
+      item.parent.insertBefore(item.element, item.next && item.next.parentNode === item.parent ? item.next : null);
+    }
+    item.active = on;
+    state.lastTouch = 0;
+    refresh();
+    positionCards();
+  }
+
+  /*
+   * Something added after a removed block was anchored just past its closing
+   * tag, which is now inside the cut. It goes where the block was instead.
+   */
+  function liveAnchor(anchor) {
+    for (var i = 0; i < state.removals.length; i++) {
+      var x = state.removals[i];
+      if (!x.active || anchor.offset < x.cut.start || anchor.offset > x.cut.end) continue;
+      var wholeLine = x.cut.start === 0 || state.source.charAt(x.cut.start - 1) === '\n';
+      return wholeLine
+        ? { offset: x.cut.start, before: anchor.before.replace(/^[\r\n]+/, ''),
+            after: Blocks.newlineOf(state.source) }
+        : { offset: x.cut.start, before: '', after: '' };
+    }
+    return anchor;
+  }
+
   // The editable island just before `el` in the document, for the caret to
   // land in once `el` is gone; failing that, the first one after it.
   function islandBeside(el) {
@@ -1170,6 +1295,24 @@
     return !!(e && (e.isTrusted || state.trustSynthetic));
   }
 
+  function isSaveKey(e) {
+    return (e.metaKey || e.ctrlKey) && !e.altKey && (e.key || '').toLowerCase() === 's';
+  }
+
+  /*
+   * Ctrl/Cmd+S is Save wherever the edits are: typing in the document, in a
+   * comment or a box on the bar, paused, or after Done with edits unsaved.
+   * The browser's "Save page as" would save the page as rendered, wrappers
+   * and all, which is never what is wanted here.
+   */
+  function onAnyKey(e) {
+    if (!isSaveKey(e) || !fromUser(e) || !state.regions.length) return;
+    if (state.active && !state.paused) return;          // onKeyDown has it
+    if (!state.active && !unsavedCount()) return;      // nothing of ours to save
+    e.preventDefault();
+    save();
+  }
+
   function onKeyDown(e) {
     if (!state.active || !fromUser(e)) return;
 
@@ -1188,12 +1331,20 @@
       return;
     }
 
-    // Delete and Backspace remove any empty added item the caret is in.
+    // Delete and Backspace remove any empty added item the caret is in, and
+    // a paragraph or heading from the file once every word of it is gone.
     if (e.key === 'Backspace' || e.key === 'Delete') {
       var empty = emptyAddedHere();
       if (empty) {
         e.preventDefault();
         removeAdded(empty);
+        return;
+      }
+      var gone = removableHere();
+      if (gone) {
+        e.preventDefault();
+        if (gone.refuse) flash(gone.refuse);
+        else removeFileBlock(gone.target, gone.block);
         return;
       }
     }
@@ -2279,6 +2430,7 @@
       setMoreOpen(false);
     });
     ui.authorInput.addEventListener('keydown', function (e) {
+      if (isSaveKey(e)) { e.preventDefault(); e.stopPropagation(); save(); return; }
       if (e.key === 'Enter') { e.preventDefault(); ui.authorSave.click(); }
       e.stopPropagation();       // typing a name is not an editing shortcut
     });
@@ -2425,7 +2577,7 @@
     var byBlock = new Map();
     for (i = 0; i < state.regions.length; i++) {
       r = state.regions[i];
-      if (r.kind === 'text' && r.current !== r.original) {
+      if (r.kind === 'text' && r.current !== r.original && r.island.isConnected) {
         var block = Blocks.blockFor(r.island) || r.island;
         var group = byBlock.get(block);
         if (!group) {
@@ -2465,6 +2617,10 @@
                   by: typed[0] && typed[0].by,
                   target: t.element, region: t });
     }
+    state.removals.forEach(function (x) {
+      if (x.active) list.push({ kind: 'removed', what: x.what, before: x.before, by: x.by,
+                                target: x.next && x.next.isConnected && x.next.nodeType === 1 ? x.next : null, item: x });
+    });
     for (i = 0; i < state.comments.length; i++) {
       var c = state.comments[i];
       var text = c.text.trim();
@@ -2497,6 +2653,7 @@
       return who + ' · edited';
     }
     if (ch.kind === 'added') return who + ' · added a ' + ch.what + ai;
+    if (ch.kind === 'removed') return who + ' · removed an empty ' + ch.what;
     if (ch.kind === 'comment-add') return who + ' · added a comment';
     if (ch.kind === 'comment-edit') return 'Comment edited' + (ch.by ? ' (' + ch.by + '’s)' : '');
     return 'Comment deleted' + (ch.by ? ' (' + ch.by + '’s)' : '');
@@ -2592,6 +2749,15 @@
       pushHistory(entry);
       applyMulti(entry, true);
       renderReview();         // a suggestion for that paragraph is stale now
+    } else if (ch.kind === 'removed') {
+      // Back in the page, and with the words it had in the file.
+      var steps = [{ kind: 'restore-block', item: ch.item }];
+      var words = ch.item.runs.filter(function (r) { return r.current !== r.original; })
+        .map(function (r) { return multiChange(r, r.original); });
+      if (words.length) steps.push({ kind: 'multi', changes: words, revert: true });
+      var back = { kind: 'group', entries: steps };
+      pushHistory(back);
+      redoEntry(back);
     } else if (ch.kind === 'added') {
       if (!ch.region || ch.region.removed) return false;
       setAdded(ch.region, false);
@@ -2667,7 +2833,11 @@
       var what = doc().createElement('span');
       what.className = 'c-diff';
       if (ch.kind === 'edit' || ch.kind === 'comment-edit') diffInto(what, ch.before, ch.after);
-      else if (ch.kind === 'comment-del') { var d = doc().createElement('del'); d.textContent = visible(ch.before); what.appendChild(d); }
+      else if (ch.kind === 'comment-del' || ch.kind === 'removed') {
+        var d = doc().createElement('del');
+        d.textContent = visible(ch.before) || '(it was empty)';
+        what.appendChild(d);
+      }
       else what.textContent = visible(ch.after);
       btn.appendChild(who);
       btn.appendChild(what);
@@ -2681,7 +2851,7 @@
       var undoBtn = doc().createElement('button');
       undoBtn.className = 'c-undo';
       undoBtn.textContent = 'Undo';
-      undoBtn.title = ch.kind === 'comment-del' ? 'Bring this comment back'
+      undoBtn.title = ch.kind === 'comment-del' || ch.kind === 'removed' ? 'Bring it back, with its words'
         : ch.kind === 'added' || ch.kind === 'comment-add' ? 'Take this back out'
         : 'Put this back as it is in the file';
       undoBtn.setAttribute('aria-label', 'Undo this change: ' + changeHeading(ch));
@@ -2764,7 +2934,8 @@
     var head = doc().createElement('div');
     head.className = 's-what';
     var who = x.ai ? 'AI' + (x.model ? ' (' + x.model + ')' : '') : displayName(x.by);
-    head.textContent = x.kind === 'added' ? who + ' added this, where the file has since changed'
+    head.textContent = x.kind === 'removed' ? 'You removed an empty block here, and the other tool has changed it since \u2014 it stays'
+      : x.kind === 'added' ? who + ' added this, where the file has since changed'
       : x.kind === 'comment' ? (x.by ? x.by + '’s' : 'A') + ' comment, where the file has since changed'
       : x.theirs != null ? who + ' and the other tool both changed this' : who + ' changed this, and the other tool rewrote or removed it';
     item.appendChild(head);
@@ -3018,6 +3189,7 @@
     }
     shadow.querySelector('.ai-go').addEventListener('click', go);
     ui.aiInstruction.addEventListener('keydown', function (e) {
+      if (isSaveKey(e)) { e.preventDefault(); e.stopPropagation(); save(); return; }
       if (e.key === 'Enter') { e.preventDefault(); go(); }
       e.stopPropagation();        // typing an instruction is not an editing shortcut
     });
@@ -3739,12 +3911,13 @@
       if (region.kind === 'insert') {
         // An added block nobody typed into is not written at all.
         if (!region.current) continue;
+        var anchor = liveAnchor(region.anchor);
         edits.push({
-          start: region.anchor.offset,
-          end: region.anchor.offset,
-          replacement: region.anchor.before +
+          start: anchor.offset,
+          end: anchor.offset,
+          replacement: anchor.before +
             Blocks.markup(region.template, serialise(region.current, region.span)) +
-            region.anchor.after,
+            anchor.after,
         });
         continue;
       }
@@ -3757,6 +3930,9 @@
       });
     }
 
+    state.removals.forEach(function (x) {
+      if (x.active) edits.push({ start: x.cut.start, end: x.cut.end, replacement: '' });
+    });
     collectCommentEdits(edits);
     return edits;
   }
@@ -3768,17 +3944,18 @@
    */
   function treeEdit(tree) {
     if (tree.removed || !treeHasText(tree)) return null;
+    var anchor = liveAnchor(tree.anchor);
     return {
-      start: tree.anchor.offset,
-      end: tree.anchor.offset,
-      replacement: tree.anchor.before + Structures.markup(tree.element, {
+      start: anchor.offset,
+      end: anchor.offset,
+      replacement: anchor.before + Structures.markup(tree.element, {
         newline: Blocks.newlineOf(state.source),
         indent: tree.indent,
         text: function (island) {
           var cell = state.byIsland.get(island);
           return cell ? serialise(cell.current, cell.span) : '';
         },
-      }) + tree.anchor.after,
+      }) + anchor.after,
     };
   }
 
@@ -4019,6 +4196,7 @@
         return { region: r, value: commentWanted(r), visible: !!state.commentsVisible };
       }));
     var skipped = emptyAddedCount() + emptyCommentCount();
+    var removedAtSave = state.removals.map(function (x) { return { item: x, active: x.active }; });
 
     var toServer = !!(state.served && state.served.canPut);
     flash(state.saveFile ? 'Saving…' : (toServer ? 'Saving to the server…' : 'Saving…'));
@@ -4049,6 +4227,7 @@
       }
       state.written = text;
       state.earlierThisLoad = collectChanges().map(rowRecord);
+      removedAtSave.forEach(function (x) { x.item.saved = x.active; });
       for (var i = 0; i < snapshot.length; i++) {
         snapshot[i].region.saved = snapshot[i].value;
         if (snapshot[i].region.kind === 'comment') {
@@ -4164,6 +4343,9 @@
         }
       }
     }
+    state.removals.forEach(function (x) {
+      if (x.active && !x.saved) edits.push({ k: 'remove', start: x.tags.start, end: x.tags.end, what: x.what, before: x.before });
+    });
     for (var j = 0; j < state.comments.length; j++) {
       var c = state.comments[j];
       var want = commentWanted(c);
@@ -4375,6 +4557,18 @@
           var c = block && addCommentTo(block, { text: e.text, author: e.author });
           if (c) { c.date = e.date; restored++; }
           else conflicts.push({ kind: 'comment', base: '', theirs: null, mine: e.text, by: e.author });
+        } else if (e.k === 'remove') {
+          var mr = Rebase.mapRange(d, e.start, e.end);
+          var el = mr && openingAt.get(mr.start);
+          var er = el && state.map.elements.get(el);
+          if (er && er.endTag && er.endTag.end === mr.end) {
+            var gone = makeRemoval(el, el.localName === 'ul' || el.localName === 'ol' ? el.firstElementChild || el : el);
+            gone.by = e.by || gone.by;
+            setRemoval(gone, true);
+            restored++;
+          } else {
+            conflicts.push({ kind: 'removed', base: '', theirs: null, mine: e.before || '' });
+          }
         } else if (e.k === 'comment-change') {
           var cm = state.comments.find(function (x) { return x.original === e.expected && !used.has(x); });
           if (cm) {
@@ -4606,6 +4800,10 @@
     // mode is switched off, and losing them to a stray navigation would be the
     // worst thing this extension could do.
     win().addEventListener('beforeunload', onBeforeUnload);
+    // Removed first, so starting again never adds it twice; added every time,
+    // because document.open() (how the web app shows a file) drops listeners.
+    doc().removeEventListener('keydown', onAnyKey, true);
+    doc().addEventListener('keydown', onAnyKey, true);
   }
 
   function status() {
@@ -4646,6 +4844,7 @@
     openChanges: openChanges,
     revertChange: revertChange,
     sessionSnapshot: sessionSnapshot,
+    removeFileBlock: removeFileBlock,
     resume: resume,
     conflicts: function () { return state.conflicts.slice(); },
     outsideChanges: function () { return state.outside.slice(); },

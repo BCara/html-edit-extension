@@ -88,6 +88,22 @@ function backspace(island, count, index) {
   return true;
 }
 
+// Select everything in a run and delete it, as a person would.
+function emptyIsland(island) {
+  island.focus();
+  const sel = document.getSelection();
+  const range = document.createRange();
+  range.selectNodeContents(island);
+  sel.removeAllRanges();
+  sel.addRange(range);
+  const before = new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true });
+  island.dispatchEvent(before);
+  if (before.defaultPrevented) return false;
+  range.deleteContents();
+  island.dispatchEvent(new InputEvent('input', { inputType: 'deleteContentBackward', bubbles: true }));
+  return true;
+}
+
 function dispatchBeforeInput(island, inputType, index) {
   caretTo(island, index);
   const ev = new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true });
@@ -1045,19 +1061,64 @@ async function run() {
     VibeReviseEditor.undo();
   }
 
-  heading('nothing that came from the file is ever removed by a key');
+  heading('an emptied paragraph from the file goes on Delete, as one undo step');
   {
-    // The case this must not get wrong: emptying a paragraph that was in the
-    // file is editing it, and Delete in it must stay an ordinary Delete.
+    // Emptying a paragraph is editing it. Delete in it once it is empty takes
+    // the element out too: <p></p> left behind still takes up space.
+    const before = VibeReviseEditor.preview();
+    const p2 = document.getElementById('p2');
     const island = islandFor('#p2');
     const value = valueOf(island);
-    backspace(island, value.length, value.length);
+    emptyIsland(island);
     eq(valueOf(island), '', 'an existing paragraph has been emptied');
+    ok(p2.isConnected, 'and it is still there while it has words to lose');
     press('Delete');
-    press('Backspace');
-    ok(document.getElementById('p2').isConnected, 'and it is still there, by both keys');
+    ok(!p2.isConnected, 'Delete in the empty paragraph takes it out');
+    const after = VibeReviseEditor.preview();
+    ok(after.indexOf('<p id="p2">') === -1, 'and out of the file');
+    ok(after.indexOf('\n\n  <!-- comment: needs a figure') === -1 && after.indexOf('</ul>\n  <!-- comment: needs a figure') !== -1,
+       'taking its whole line, with no blank gap');
+    const row = VibeReviseEditor.changes().find((c) => c.kind === 'removed');
+    ok(row && /removed an empty paragraph/.test(VibeReviseEditor.changeHeading(row)), 'the list of changes says so');
     VibeReviseEditor.undo();
-    eq(valueOf(islandFor('#p2')), value, 'undo puts its words back');
+    ok(p2.isConnected, 'undo puts the paragraph back');
+    VibeReviseEditor.undo();
+    eq(valueOf(islandFor('#p2')), value, 'and undo again its words');
+    eq(VibeReviseEditor.preview(), before, 'leaving the file as it was');
+  }
+
+  heading('undoing a removal from the list of changes brings back its words too');
+  {
+    const before = VibeReviseEditor.preview();
+    const island = islandFor('#p2');
+    emptyIsland(island);
+    press('Delete');
+    const row = VibeReviseEditor.changes().find((c) => c.kind === 'removed');
+    ok(VibeReviseEditor.revertChange(row), 'the row has an Undo');
+    eq(VibeReviseEditor.preview(), before, 'which restores the paragraph and its words in one');
+  }
+
+  heading('what Delete leaves alone');
+  {
+    // A paragraph with words left in it: an ordinary Delete.
+    const p5 = document.getElementById('p5');
+    caretTo(islandFor('#p5'), 0);
+    press('Delete');
+    ok(p5.isConnected, 'a paragraph that still has words');
+    // A paragraph with a comment on it.
+    const p3 = document.getElementById('p3');
+    const isl = islandFor('#p3');
+    emptyIsland(isl);
+    press('Delete');
+    ok(p3.isConnected, 'an emptied paragraph with a comment on it');
+    VibeReviseEditor.undo();
+    // A table cell.
+    const td = document.querySelector('#t1 tbody td');
+    const ci = islandFor('#t1 tbody td');
+    emptyIsland(ci);
+    press('Delete');
+    ok(td.isConnected, 'an emptied table cell, which the table needs');
+    VibeReviseEditor.undo();
   }
 
   heading('adding — the file still parses to what is on screen');

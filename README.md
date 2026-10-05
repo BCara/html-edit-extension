@@ -178,11 +178,12 @@ the `×` on its card; a comment left empty is not written at all.
 
 | Key | |
 | --- | --- |
-| `Ctrl`/`Cmd` + `S` | Save |
+| `Ctrl`/`Cmd` + `S` | Save, from anywhere: the document, a comment, a box on the bar, while paused, or after **Done** with changes unsaved |
 | `Ctrl`/`Cmd` + `Z` | Undo (including undoing an added block) |
 | `Ctrl`/`Cmd` + `Shift` + `Z` (or `Ctrl` + `Y`) | Redo |
 | `Enter` | Line break, or a new block at the end of one |
 | `Ctrl`/`Cmd` + `Enter` | New block |
+| `Delete` or `Backspace` in an **empty** paragraph, heading, list item or quote | Removes it, from the page and the file. Its words are already gone, so only the empty tags go with it. One undo step, and the list of changes shows it, with an **Undo** that brings back the words as well. A table cell stays, as does a block with a comment on it or anything besides words in it. The only item in a list takes the empty list with it. |
 
 ### AI suggestions, with your own key
 
@@ -443,10 +444,11 @@ offset.
 
 - **Text, blocks, structures and comments.** You can change words, add another
   block like one that is already there, insert a table or list copied from one
-  the document already has, and attach comments. You cannot move, delete or
-  resize elements, change CSS, classes, attributes or styles, or replace images.
-  That restraint is the feature; each addition was made deliberately, after the
-  fact, and each one still only ever *adds*.
+  the document already has, attach comments, and take out a paragraph or heading
+  you have emptied. You cannot move or resize elements, delete anything with
+  words still in it, change CSS, classes, attributes or styles, or replace
+  images. That restraint is the feature; each addition was made deliberately,
+  after the fact.
 - **No overwrite in place.** Chrome cannot write to a `file://` path. See
   [Using it](#using-it).
 - **Private addresses only.** `file://`, plus http(s) on loopback, RFC1918,

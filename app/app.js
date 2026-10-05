@@ -513,6 +513,13 @@ function openNetwork(url) {
 
 // --- wiring ------------------------------------------------------------------
 
+// Ctrl/Cmd+S from the app's own bar, not only from inside the document.
+window.addEventListener('keydown', function (e) {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || (e.key || '').toLowerCase() !== 's') return;
+  e.preventDefault();
+  if (current.source && window.VibeReviseEditor) window.VibeReviseEditor.save();
+});
+
 function watchUnsaved() {
   setInterval(function () {
     var s = window.VibeReviseEditor.status();
