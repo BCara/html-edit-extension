@@ -890,6 +890,21 @@ async function run() {
     ok(!tail.isConnected && !tree.element.isConnected, 'with nothing left on the page');
   }
 
+  heading('inserting a structure — the + beside the paragraph you are in splits it too');
+  {
+    const before = VibeReviseEditor.preview();
+    const island = islandFor('#p6');
+    caretTo(island, valueOf(island).indexOf(' with'));
+    const tree = VibeReviseEditor.insertStructure('bullets', document.querySelector('#p6'));
+    ok(tree && valueOf(islandFor('#p6')) === 'A paragraph that arrived', 'it splits at the cursor');
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), before, 'and undoes in one');
+    caretTo(island, valueOf(island).indexOf(' with'));
+    const other = VibeReviseEditor.insertStructure('bullets', document.querySelector('#p5'));
+    ok(other && other.element.previousElementSibling.id === 'p5', 'the + beside another paragraph still adds after that one');
+    VibeReviseEditor.undo();
+  }
+
   heading('inserting a structure — a split that would move formatting is refused');
   {
     const before = VibeReviseEditor.preview();

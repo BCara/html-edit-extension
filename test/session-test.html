@@ -1,0 +1,250 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>VibeRevise — a session through a reload</title>
+<!--
+  The case this covers: edits are made, another tool rewrites the file, the
+  page is reloaded. A reload cannot be driven from inside a page, so it is
+  played out the way the web app does it: the document is written into a
+  frame, edited, then the frame is rewritten with the file as the other tool
+  left it and the editor is started fresh over it, with only the kept session
+  carried across.
+-->
+<style>
+  body { font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 1.5rem; }
+  #doc { width: 700px; height: 300px; border: 1px solid #ccc; }
+  .pass { color: #15803d; }
+  .fail { color: #b91c1c; font-weight: 700; }
+  .head { color: #4f46e5; font-weight: 700; display: block; margin-top: .9rem; }
+  #out { white-space: pre-wrap; }
+  #summary { margin-top: 1rem; padding-top: .7rem; border-top: 1px solid #ddd; font-weight: 700; }
+</style>
+<h1 style="font:600 15px system-ui">VibeRevise — a session through a reload</h1>
+<div id="out">Running…</div>
+<div id="summary"></div>
+<iframe id="doc"></iframe>
+
+<script src="report.js"></script>
+<script src="../packages/html-splice/src/tokenizer.js"></script>
+<script src="../src/lib/mapping.js"></script>
+<script src="../packages/html-splice/src/splice.js"></script>
+<script src="../src/lib/islands.js"></script>
+<script src="../src/lib/blocks.js"></script>
+<script src="../src/lib/structures.js"></script>
+<script src="../src/lib/comments.js"></script>
+<script src="../src/lib/ai.js"></script>
+<script src="../src/lib/rebase.js"></script>
+<script src="../src/editor.js"></script>
+<script>
+'use strict';
+Report.mount('out', 'summary');
+const { heading, ok, eq, fail } = Report;
+const E = VibeReviseEditor;
+
+const V1 = [
+  '<!doctype html>',
+  '<meta charset="utf-8">',
+  '<section>',
+  '  <h1 id="h">Quarterly plan</h1>',
+  '  <p id="a">Revenue grew by twelve per cent over the quarter.</p>',
+  '  <p id="b">Staff turnover fell, and onboarding is fully staffed.</p>',
+  '  <p id="c">The supplier backlog should clear by March.</p>',
+  '  <p id="d">Costs held steady across every region.</p>',
+  '</section>',
+  '',
+].join('\n');
+
+// What the other tool did: rewrote #b, added a paragraph at the top, left the rest.
+const V2 = V1
+  .replace('  <h1 id="h">Quarterly plan</h1>\n',
+           '  <h1 id="h">Quarterly plan</h1>\n  <p id="new">A summary the other tool wrote.</p>\n')
+  .replace('Staff turnover fell, and onboarding is fully staffed.',
+           'Staff turnover dropped sharply; onboarding is now fully staffed.');
+
+const frame = document.getElementById('doc');
+let D = null;
+
+function render(source) {
+  D = frame.contentDocument;
+  D.open(); D.write(source); D.close();
+  return D;
+}
+
+// A store that keeps one session in memory, the way a host's storage would.
+function memoryStore() {
+  let kept = null;
+  return {
+    load: () => Promise.resolve(kept ? JSON.parse(JSON.stringify(kept)) : null),
+    save: (snap) => { kept = JSON.parse(JSON.stringify(snap)); return Promise.resolve(); },
+    clear: () => { kept = null; return Promise.resolve(); },
+    peek: () => kept,
+  };
+}
+
+function open(source, store, saveFile) {
+  render(source);
+  const map = VibeReviseMap.build(source, D);
+  E.init({ fresh: true, trustSynthetic: true, doc: D, source, map, filename: 'plan.html', session: store,
+           saveFile: saveFile || null });
+  E.setActive(true);
+}
+
+const island = (sel) => D.querySelector(sel + ' [data-vr-island]');
+const settle = () => new Promise((r) => setTimeout(r, 30));
+
+function type(isl, text) {
+  isl.focus();
+  VibeReviseIslands.setCaret(isl, VibeReviseIslands.readValue(isl).length);
+  const before = new InputEvent('beforeinput', { inputType: 'insertText', data: text, bubbles: true, cancelable: true });
+  isl.dispatchEvent(before);
+  if (before.defaultPrevented) return;
+  const sel = D.getSelection();
+  const range = sel.getRangeAt(0);
+  const node = D.createTextNode(text);
+  range.insertNode(node);
+  range.setStartAfter(node);
+  range.collapse(true);
+  sel.removeAllRanges(); sel.addRange(range);
+  isl.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: text, bubbles: true }));
+}
+
+async function run() {
+  heading('nothing kept: nothing asked');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    eq(store.peek(), null, 'opening a file and not editing it keeps nothing');
+  }
+
+  heading('the same file again: edits come back where they were');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    type(island('#a'), ' Strong result.');
+    type(island('#d'), ' Mostly.');
+    E.addCommentTo(D.getElementById('c'), { text: 'Is March realistic?', author: 'Cara' });
+    const wanted = E.preview();
+    E.sessionSnapshot();
+    await new Promise((r) => setTimeout(r, 800));       // the session is written after a pause
+    ok(store.peek() && store.peek().edits.length === 3, 'the session is kept as you edit');
+
+    open(V1, store);                                      // the reload
+    await settle();
+    ok(E.resume(true), 'carrying on puts it back');
+    eq(E.preview(), wanted, 'the file Save would write is exactly what it was before the reload');
+    eq(E.status().changed > 0, true, 'and it counts as unsaved');
+  }
+
+  heading('the other tool changed the file: untouched passages take the edit, changed ones clash');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    type(island('#b'), ' Hiring continues.');               // the other tool rewrites this one
+    type(island('#c'), ' Probably.');                       // and leaves this one alone
+    await new Promise((r) => setTimeout(r, 800));
+
+    open(V2, store);                                          // reloaded onto the other tool's version
+    await settle();
+    const res = E.resume(true);
+    ok(res && res.restored === 1, 'the edit to the untouched paragraph goes back on');
+    const file = E.preview();
+    ok(file.indexOf('by March. Probably.</p>') !== -1, 'at the right place, though the paragraph moved down a line');
+    ok(file.indexOf('Staff turnover dropped sharply; onboarding is now fully staffed.</p>') !== -1,
+       'the other tool’s rewrite is left exactly as it wrote it');
+    ok(file.indexOf('Hiring continues.') === -1, 'and nothing is written over it');
+
+    const clashes = E.conflicts();
+    eq(clashes.length, 1, 'the edit to the rewritten paragraph is a clash');
+    ok(clashes[0] && /dropped sharply/.test(clashes[0].theirs), 'shown beside the other tool’s words');
+    ok(clashes[0] && /Hiring continues\./.test(clashes[0].mine), 'and the user’s');
+
+    const outside = E.outsideChanges();
+    ok(outside.some((o) => /summary the other tool wrote/.test(o.after)), 'what the other tool added is listed');
+    ok(outside.some((o) => /dropped sharply/.test(o.after) && /turnover fell/.test(o.before)), 'and what it rewrote');
+
+    ok(E.settleConflict(clashes[0], true), 'keeping mine');
+    ok(E.preview().indexOf('Staff turnover fell, and onboarding is fully staffed. Hiring continues.</p>') !== -1,
+       'puts the user’s words in place of the other tool’s, as an edit');
+    eq(E.conflicts().length, 0, 'and the clash is settled');
+    E.undo();
+    ok(E.preview().indexOf('dropped sharply') !== -1, 'one undo gives the other tool’s words back');
+  }
+
+  heading('added paragraphs and lists come back onto a changed file');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    const added = E.addAfterIsland(island('#c'));
+    type(added.island, 'An added paragraph.');
+    const isl = island('#d');
+    isl.focus();
+    VibeReviseIslands.setCaret(isl, VibeReviseIslands.readValue(isl).indexOf(' across'));
+    const tree = E.insertStructure('bullets');           // splits #d at the cursor
+    type(tree.cells[0].island, 'A bullet.');
+    await new Promise((r) => setTimeout(r, 800));
+
+    open(V2, store);
+    await settle();
+    E.resume(true);
+    const file = E.preview();
+    const at = (t) => file.indexOf(t);
+    ok(at('by March.</p>') < at('<p>An added paragraph.</p>'), 'the added paragraph is back after the one it followed');
+    ok(at('<p id="d">Costs held steady</p>') !== -1, 'the split paragraph keeps its first half');
+    ok(at('<p id="d">Costs held steady</p>') < at('<li>A bullet.</li>') &&
+       at('<li>A bullet.</li>') < at('<p>across every region.</p>'),
+       'then the list, then the second half, in order');
+    eq(E.conflicts().length, 0, 'with no clashes, since the other tool left those paragraphs alone');
+  }
+
+  heading('starting fresh forgets it');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    type(island('#a'), ' Gone soon.');
+    await new Promise((r) => setTimeout(r, 800));
+    open(V2, store);
+    await settle();
+    E.resume(false);
+    ok(E.preview().indexOf('Gone soon.') === -1, 'the edit is not put back');
+    await settle();
+    eq(store.peek(), null, 'and the kept session is cleared');
+  }
+
+  heading('saving, then the other tool, then a reload');
+  {
+    const store = memoryStore();
+    // A host that "saves" by keeping the text.
+    let written = null;
+    open(V1, store, (text) => { written = text; return Promise.resolve({ ok: true, where: 'Saved' }); });
+    await settle();
+    type(island('#a'), ' Saved edit.');
+    await E.save();
+    type(island('#d'), ' Unsaved edit.');
+    await new Promise((r) => setTimeout(r, 800));
+
+    // The other tool works on the saved file.
+    const v3 = written.replace('The supplier backlog should clear by March.', 'The backlog is cleared.');
+    open(v3, store);
+    await settle();
+    const res = E.resume(true);
+    eq(E.conflicts().length, 0, 'no clashes: the saved edit is already in the file');
+    ok(E.preview().indexOf('Costs held steady across every region. Unsaved edit.') !== -1, 'the unsaved edit comes back');
+    eq(E.preview().split('Saved edit.').length, 2, 'and the saved one is not written twice');
+    const out = E.outsideChanges();
+    eq(out.length, 1, 'only the other tool’s change is listed as outside');
+    ok(out[0] && /backlog is cleared/.test(out[0].after), 'which is the one it made');
+    ok(res && res.restored === 1, 'one change put back');
+  }
+
+  Report.finish();
+}
+
+run().catch((err) => {
+  fail('  FAIL  suite crashed — ' + (err && err.stack || err));
+  Report.finish();
+});
+</script>

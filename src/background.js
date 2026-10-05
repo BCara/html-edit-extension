@@ -51,6 +51,7 @@ const INJECT_FILES = [
   'src/lib/comments.js',
   'src/lib/prompt.js',
   'src/lib/ai.js',
+  'src/lib/rebase.js',
   'src/editor.js',
   'src/content.js',
 ];

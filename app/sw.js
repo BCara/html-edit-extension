@@ -17,7 +17,7 @@
 
 // Bump this to retire the previous cache. It is the app's shell version, not
 // the extension's.
-const CACHE = 'viberevise-shell-v5';
+const CACHE = 'viberevise-shell-v6';
 
 const SHELL = [
   'index.html',
@@ -34,6 +34,7 @@ const SHELL = [
   '../src/lib/comments.js',
   '../src/lib/prompt.js',
   '../src/lib/ai.js',
+  '../src/lib/rebase.js',
   '../src/editor.js',
   '../icons/icon192.png',
   '../icons/icon512.png',

@@ -11,6 +11,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 echo "== node: AI with your own key (no network) =="
 node "$DIR/src/lib/ai.test.js" || NODE_FAIL=1
+node "$DIR/src/lib/rebase.test.js" || NODE_FAIL=1
 
 echo
 echo "== node: origins and the write-back probe =="
@@ -82,6 +83,7 @@ run_page() {
 FLAG=--allow-file-access-from-files
 run_page mapping-test.html "offset mapping" "$FLAG" || BROWSER_FAIL=1
 run_page editor-test.html "edit mode, end to end" "$FLAG" || BROWSER_FAIL=1
+run_page session-test.html "a session through a reload" "$FLAG" || BROWSER_FAIL=1
 # No flag here, on purpose. See the comment in the page.
 run_page file-read-test.html "file read constraints (no flag)" || BROWSER_FAIL=1
 

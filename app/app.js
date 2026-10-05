@@ -123,6 +123,29 @@ function writeAIConfig(cfg) {
   } catch (e) { return false; }    // a private window may refuse
 }
 
+/*
+ * The editing session, kept through a reload, under the file's name. This
+ * app's own storage on this device; never sent anywhere. A file too big to
+ * keep is simply not kept, and the editor says so.
+ */
+function sessionFor(name) {
+  var key = 'viberevise:session:' + name;
+  return {
+    load: function () {
+      try { var raw = localStorage.getItem(key); return Promise.resolve(raw ? JSON.parse(raw) : null); }
+      catch (e) { return Promise.resolve(null); }
+    },
+    save: function (snap) {
+      try { localStorage.setItem(key, JSON.stringify(snap)); return Promise.resolve(); }
+      catch (e) { return Promise.reject(e); }
+    },
+    clear: function () {
+      try { localStorage.removeItem(key); } catch (e) { /* nothing to clear */ }
+      return Promise.resolve();
+    },
+  };
+}
+
 // Handed to the editor as options.ai.
 var AI_HOST = {
   status: function () {
@@ -291,6 +314,8 @@ async function load(source, name, handle) {
     saveFile: saveFile,
     settings: SETTINGS,
     ai: AI ? AI_HOST : null,
+    session: sessionFor(current.name),
+    fresh: true,
   });
   window.VibeReviseEditor.setActive(true);
 

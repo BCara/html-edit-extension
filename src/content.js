@@ -24,11 +24,11 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.14.1';
+  var VERSION = '0.15.0';
   var REQUIRED = [
     'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
     'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',
-    'VibeReviseComments', 'VibeRevisePrompt', 'VibeReviseAI', 'VibeReviseEditor',
+    'VibeReviseComments', 'VibeRevisePrompt', 'VibeReviseAI', 'VibeReviseRebase', 'VibeReviseEditor',
   ];
 
   function missingModules() {
@@ -104,6 +104,43 @@
       var o = {};
       o[key] = value;
       return chrome.storage.local.set(o);
+    },
+  };
+
+  /*
+   * The editing session, kept through a reload: another tool may rewrite the
+   * file, and reloading to see it must not throw away unsaved edits. Kept in
+   * extension storage on this device only, under the document's address, and
+   * never sent anywhere. The newest few are kept, for two weeks at most.
+   */
+  var SESSION_KEEP = 8;
+  function sessionKey() { return 'session:' + location.href.split('#')[0]; }
+  var SESSION = {
+    load: function () {
+      var key = sessionKey();
+      return chrome.storage.local.get(key).then(function (o) { return o[key] || null; });
+    },
+    save: function (snap) {
+      var key = sessionKey();
+      var o = {};
+      o[key] = snap;
+      return chrome.storage.local.set(o).then(function () {
+        return chrome.storage.local.get('sessions');
+      }).then(function (got) {
+        var list = (got.sessions || []).filter(function (s) { return s.key !== key; });
+        list.unshift({ key: key, at: snap.at });
+        var drop = list.slice(SESSION_KEEP).map(function (s) { return s.key; });
+        var p = drop.length ? chrome.storage.local.remove(drop) : Promise.resolve();
+        return p.then(function () { return chrome.storage.local.set({ sessions: list.slice(0, SESSION_KEEP) }); });
+      });
+    },
+    clear: function () {
+      var key = sessionKey();
+      return chrome.storage.local.remove(key).then(function () {
+        return chrome.storage.local.get('sessions');
+      }).then(function (got) {
+        return chrome.storage.local.set({ sessions: (got.sessions || []).filter(function (s) { return s.key !== key; }) });
+      });
     },
   };
 
@@ -499,6 +536,7 @@
           source: source, map: map, filename: filename(), served: state.served,
           settings: SETTINGS,
           ai: AI_HOST,
+          session: SESSION,
           // Non-null whenever this browser can write a file at all: Save then
           // writes over the top of the file rather than downloading a copy,
           // asking once for somewhere to write if it does not already know.

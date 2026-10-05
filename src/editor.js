@@ -101,7 +101,7 @@
     return state.win || (state.doc && state.doc.defaultView) || window;
   }
 
-  var state = {
+  function makeState() { return {
     active: false,
     paused: false,        // edit mode on, but the page handed back for selecting and copying
     doc: null,            // the document being edited; null means this one
@@ -145,7 +145,20 @@
     styleEl: null,
     listening: false,
     flashTimer: 0,
-  };
+    // Carrying a session through a reload. See "the file changed underneath".
+    session: null,        // host storage for this document: { load(), save(obj), clear() }
+    prior: null,          // what was kept from last time, until the user says what to do with it
+    resumePending: false, // asked "carry on?" and not yet answered: keep nothing until then
+    restoring: false,     // putting edits back: quiet, and not history
+    sessionTimer: 0,
+    sessionWarned: false,
+    sessionRead: false,   // the kept session has been read: only then may it be replaced
+    written: null,        // the text last saved from this page, if any
+    conflicts: [],        // edits that could not go back on, because the file changed there
+    outside: [],          // what changed in the file outside VibeRevise
+    earlier: [],          // changes saved before the last reload, as rows to show
+  }; }
+  var state = makeState();
 
   /*
    * Island styling.
@@ -475,7 +488,7 @@
       return null;
     }
 
-    var template = Blocks.templateFor(opts.like || block);
+    var template = opts.template || Blocks.templateFor(opts.like || block);
     var element = doc().createElement(template.tag);
     if (template.className) element.setAttribute('class', template.className);
 
@@ -618,7 +631,7 @@
     if (!tail.replace(EDGE, '') && !laterText) return null;
     if (!head.replace(EDGE, '') && !earlierText) return null;
     if (laterText || island.parentNode !== block) {
-      return { refuse: 'VibeRevise cannot split a paragraph inside or before its bold, italic or links — move the cursor past them' };
+      return { block: block, refuse: 'VibeRevise cannot split a paragraph inside or before its bold, italic or links — move the cursor past them' };
     }
     return {
       island: island, region: region, block: block,
@@ -645,9 +658,11 @@
     var block = where || currentBlock();
     if (!block) { flash('VibeRevise cannot tell where to put that in the file'); return null; }
 
-    // Part-way through a paragraph, the paragraph is split around it. Only
-    // from the caret: the + beside a block means "after this block".
-    var split = where ? null : splitPoint();
+    // Part-way through a paragraph, the paragraph is split around it: from
+    // Insert, or from the + beside the very paragraph the caret is in. The +
+    // beside any other block means "after this block".
+    var split = splitPoint();
+    if (split && where && where !== split.block) split = null;
     if (split && split.refuse) { flash(split.refuse); return null; }
 
     var place = placementFor(block, id);
@@ -673,6 +688,7 @@
     var tree = {
       kind: 'tree',
       id: id,
+      inside: place.parent === block,   // in a table cell, under its text
       element: built.element,
       island: built.islands[0],     // the one setAdded() puts the caret back in
       islands: built.islands,
@@ -1229,6 +1245,7 @@
   }
 
   function onBeforeUnload(e) {
+    saveSessionNow();
     if (!unsavedCount()) return;
     e.preventDefault();
     e.returnValue = '';
@@ -2314,8 +2331,12 @@
       : shown + (shown === 1 ? ' change' : ' changes') + (unsaved ? ' · unsaved' : ' · saved');
     if (empty) text += ' · ' + empty + ' empty' + (empty === 1 ? '' : 's') + ' not saved';
 
+    if (state.conflicts.length) {
+      text += ' · ' + state.conflicts.length + (state.conflicts.length === 1 ? ' clash' : ' clashes');
+    }
     state.ui.count.textContent = text;
     state.ui.save.disabled = unsaved === 0;
+    scheduleSession();
     state.ui.undo.disabled = state.historyAt === 0;
     state.ui.redo.disabled = state.historyAt >= state.history.length;
     // Saving in place and saving a copy are different enough acts that the
@@ -2331,7 +2352,7 @@
   }
 
   function flash(message) {
-    if (!state.ui) return;
+    if (!state.ui || state.restoring) return;
     state.ui.msg.textContent = message;
     clearTimeout(state.flashTimer);
     state.flashTimer = setTimeout(function () {
@@ -2618,7 +2639,8 @@
     var head = doc().createElement('div');
     head.className = 'c-head';
     var title = doc().createElement('strong');
-    title.textContent = list.length ? 'Changes (' + list.length + ')' : 'No changes yet';
+    title.textContent = list.length ? 'Changes (' + list.length + ')'
+      : (state.conflicts.length || state.outside.length || state.earlier.length) ? 'Changes' : 'No changes yet';
     var close = doc().createElement('button');
     close.className = 'x';
     close.title = 'Close';
@@ -2668,6 +2690,120 @@
       ol.appendChild(li);
     });
     box.appendChild(ol);
+
+    if (state.conflicts.length) {
+      box.appendChild(sectionHead('Clashes (' + state.conflicts.length + ')',
+        'You changed these, and so did something outside VibeRevise. Keep one or the other.'));
+      state.conflicts.forEach(function (x) { box.appendChild(conflictRow(x)); });
+    }
+    if (state.outside.length) {
+      box.appendChild(sectionHead('Changed outside VibeRevise (' + state.outside.length + ')',
+        'Already in the file. Shown so you can see what the other tool did.'));
+      var ol2 = doc().createElement('ol');
+      ol2.className = 'c-list';
+      state.outside.forEach(function (o) {
+        ol2.appendChild(infoRow('Changed outside VibeRevise · ' + shortTime(o.at), o.before, o.after, o.target));
+      });
+      box.appendChild(ol2);
+    }
+    if (state.earlier.length) {
+      box.appendChild(sectionHead('Saved before the reload (' + state.earlier.length + ')', ''));
+      var ol3 = doc().createElement('ol');
+      ol3.className = 'c-list';
+      state.earlier.forEach(function (e) {
+        ol3.appendChild(infoRow(e.heading + ' · ' + shortTime(e.at), e.before, e.after, null));
+      });
+      box.appendChild(ol3);
+    }
+  }
+
+  function shortTime(at) {
+    return new Date(at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  }
+
+  function sectionHead(title, note) {
+    var wrap = doc().createElement('div');
+    wrap.className = 'c-section';
+    var t = doc().createElement('strong');
+    t.textContent = title;
+    wrap.appendChild(t);
+    if (note) {
+      var n = doc().createElement('div');
+      n.className = 'c-note';
+      n.textContent = note;
+      wrap.appendChild(n);
+    }
+    return wrap;
+  }
+
+  function infoRow(heading, before, after, target) {
+    var li = doc().createElement('li');
+    var row = doc().createElement('button');
+    row.className = 'c-row c-info';
+    var who = doc().createElement('span');
+    who.className = 'c-who';
+    who.textContent = heading;
+    var what = doc().createElement('span');
+    what.className = 'c-diff';
+    diffInto(what, before, after);
+    row.appendChild(who);
+    row.appendChild(what);
+    row.addEventListener('click', function () {
+      if (!target || !target.isConnected) return;
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target.setAttribute(ACTIVE_ATTR, '');
+      setTimeout(function () { target.removeAttribute(ACTIVE_ATTR); }, 1400);
+    });
+    li.appendChild(row);
+    return li;
+  }
+
+  function conflictRow(x) {
+    var item = doc().createElement('div');
+    item.className = 's-item stale';
+    var head = doc().createElement('div');
+    head.className = 's-what';
+    var who = x.ai ? 'AI' + (x.model ? ' (' + x.model + ')' : '') : displayName(x.by);
+    head.textContent = x.kind === 'added' ? who + ' added this, where the file has since changed'
+      : x.kind === 'comment' ? (x.by ? x.by + '’s' : 'A') + ' comment, where the file has since changed'
+      : x.theirs != null ? who + ' and the other tool both changed this' : who + ' changed this, and the other tool rewrote or removed it';
+    item.appendChild(head);
+
+    function line(label, text, base) {
+      var row = doc().createElement('div');
+      row.className = 'c-diff';
+      var b = doc().createElement('b');
+      b.textContent = label + ' ';
+      row.appendChild(b);
+      if (base != null) diffInto(row, base, text);
+      else row.appendChild(doc().createTextNode(visible(text)));
+      item.appendChild(row);
+    }
+    if (x.theirs != null) line('Theirs:', x.theirs, x.base || null);
+    line('Yours:', x.mine, x.base || null);
+
+    var tools = doc().createElement('div');
+    tools.className = 'r-tools';
+    if (x.region) {
+      var mine = doc().createElement('button');
+      mine.className = 'pill primary';
+      mine.textContent = 'Keep mine';
+      mine.title = 'Put your words in place of theirs';
+      mine.addEventListener('click', function () { settleConflict(x, true); });
+      tools.appendChild(mine);
+    }
+    var theirs = doc().createElement('button');
+    theirs.className = 'pill';
+    theirs.textContent = x.region ? 'Keep theirs' : 'Dismiss';
+    theirs.addEventListener('click', function () { settleConflict(x, false); });
+    var copy = doc().createElement('button');
+    copy.className = 'pill';
+    copy.textContent = 'Copy mine';
+    copy.addEventListener('click', function () { copyText(visible(x.mine).replace(/ \u21b5 /g, '\n'), 'Copied your version'); });
+    tools.appendChild(theirs);
+    tools.appendChild(copy);
+    item.appendChild(tools);
+    return item;
   }
 
   // --- the layer the changes list floats in ----------------------------------
@@ -2698,6 +2834,9 @@
     '  border-left: 3px solid rgba(255, 255, 255, .25); }',
     '.c-row:hover { background: rgba(255, 255, 255, .12); }',
     '.c-list li { position: relative; }',
+    '.c-section { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }',
+    '.c-info { border-left-color: #5fb3d9; }',
+    '.changes .s-item b { font-weight: 600; color: #c6cbd6; }',
     '.c-who { font-weight: 600; font-size: 12px; padding-right: 52px; }',
     '.c-undo { position: absolute; top: 6px; right: 6px; padding: 2px 9px; border-radius: 999px;',
     '  font-size: 11.5px; background: rgba(255, 255, 255, .13); }',
@@ -2748,17 +2887,21 @@
     shadow.innerHTML = '<style>' + ASSIST_CSS + '</style>' +
       '<div class="layer">' +
         '<div class="changes" hidden role="dialog" aria-label="Changes"></div>' +
+        '<div class="changes resume" hidden role="dialog" aria-label="Carry on"></div>' +
         '<div class="review" hidden role="dialog" aria-label="AI suggestions"></div>' +
       '</div>';
     doc().documentElement.appendChild(host);
 
     // A click inside the list is not a click "away" from it.
-    shadow.querySelector('.changes').addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    shadow.querySelectorAll('.changes').forEach(function (el) {
+      el.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    });
     shadow.querySelector('.review').addEventListener('mousedown', function (e) { e.stopPropagation(); });
 
     state.assist = {
       host: host,
-      changes: shadow.querySelector('.changes'),
+      changes: shadow.querySelector('.changes:not(.resume)'),
+      resume: shadow.querySelector('.resume'),
       review: shadow.querySelector('.review'),
     };
     return state.assist;
@@ -3904,6 +4047,8 @@
           : 'Save failed: ' + ((res && res.message) || 'unknown error'));
         return;
       }
+      state.written = text;
+      state.earlierThisLoad = collectChanges().map(rowRecord);
       for (var i = 0; i < snapshot.length; i++) {
         snapshot[i].region.saved = snapshot[i].value;
         if (snapshot[i].region.kind === 'comment') {
@@ -3912,6 +4057,7 @@
       }
       renderRail();
       refresh();
+      saveSessionNow();
 
       var where;
       if (res.where) {
@@ -3933,6 +4079,362 @@
     });
   }
 
+
+  // --- the file changed underneath: carrying a session through a reload -------
+
+  /*
+   * Another tool rewrites the file, the page is reloaded, and everything held
+   * only in the page is gone: unsaved edits, who made which change, what is
+   * still waiting to be resolved. So the session is kept, in the host's own
+   * storage (never the page's, never sent anywhere), and offered back.
+   *
+   * What is kept is the file as this page opened it, the text last saved from
+   * it, and each unsaved edit as what the file held there and what the user
+   * made it. Coming back to a file that has changed since, each edit goes
+   * back on only where the file still holds what it held before. Anywhere the
+   * other tool changed, the edit is a CLASH: shown, with the other tool's
+   * words beside it, and settled by the user. Nothing is written over words
+   * VibeRevise has not seen.
+   *
+   * Undo history is not kept: it is a list of steps through DOM that is gone.
+   * Each restored change can still be undone from its row.
+   */
+  var SESSION_DAYS = 14;
+
+  function scheduleSession() {
+    if (!state.session || state.resumePending || state.restoring) return;
+    clearTimeout(state.sessionTimer);
+    state.sessionTimer = setTimeout(saveSessionNow, 700);
+  }
+
+  function saveSessionNow() {
+    if (!state.session || !state.sessionRead || state.resumePending || state.restoring || !state.regions.length) return;
+    clearTimeout(state.sessionTimer);
+    var snap = sessionSnapshot();
+    var empty = !snap.edits.length && !snap.conflicts.length && !snap.outside.length && !snap.earlier.length;
+    var done = empty ? state.session.clear() : state.session.save(snap);
+    Promise.resolve(done).catch(function (err) {
+      if (state.sessionWarned) return;
+      state.sessionWarned = true;
+      console.warn('[VibeRevise] could not keep the session:', err);
+      flash('This document is too big to keep through a reload — save before reloading');
+    });
+  }
+
+  // A changes-list row, reduced to what can be shown again after a reload.
+  function rowRecord(ch) {
+    return { heading: changeHeading(ch), before: ch.before || '', after: ch.after || '', at: Date.now() };
+  }
+
+  function sessionSnapshot() {
+    var edits = [];
+    var islands = doc().querySelectorAll('[' + Islands.ATTR + ']');
+    var trees = new Set();
+    var meta = function (r) {
+      return { by: r.by || null, ai: !!r.ai, model: r.aiModel || null, human: !!r.humanToo };
+    };
+    for (var i = 0; i < islands.length; i++) {
+      var r = state.byIsland.get(islands[i]);
+      if (!r || r.removed) continue;
+      if (r.kind === 'text') {
+        if (r.current === r.saved) continue;
+        edits.push(Object.assign({ k: 'text', start: r.record.span.start, end: r.record.span.end,
+          expected: r.saved, mine: r.current }, meta(r)));
+      } else if (r.kind === 'insert') {
+        if (!r.current || r.current === r.saved) continue;
+        if (r.saved) {                 // already in the file as its own block
+          edits.push(Object.assign({ k: 'found', expected: r.saved, mine: r.current }, meta(r)));
+        } else {
+          edits.push(Object.assign({ k: 'insert', anchor: r.anchor.offset,
+            template: r.template, mine: r.current }, meta(r)));
+        }
+      } else if (r.kind === 'cell' && !trees.has(r.tree)) {
+        var t = r.tree;
+        trees.add(t);
+        if (t.removed || !treeHasText(t)) continue;
+        var saved = t.cells.some(function (c) { return c.saved; });
+        if (saved) {
+          t.cells.forEach(function (c) {
+            if (c.current !== c.saved) edits.push(Object.assign({ k: 'found', expected: c.saved, mine: c.current }, meta(c)));
+          });
+        } else {
+          edits.push({ k: 'tree', id: t.id, anchor: t.anchor.offset, inside: !!t.inside,
+            cells: t.cells.map(function (c) { return c.current; }),
+            by: (t.cells.find(function (c) { return c.by; }) || {}).by || null });
+        }
+      }
+    }
+    for (var j = 0; j < state.comments.length; j++) {
+      var c = state.comments[j];
+      var want = commentWanted(c);
+      if (want === c.saved) continue;
+      if (c.saved === null) {
+        if (c.removed || !c.text.trim()) continue;
+        edits.push({ k: 'comment-new', anchor: c.anchor.offset, text: c.text, author: c.author, date: c.date });
+      } else {
+        edits.push({ k: 'comment-change', expected: c.saved, text: c.text, removed: !!c.removed || want === null });
+      }
+    }
+    return {
+      v: 1,
+      at: Date.now(),
+      filename: state.filename,
+      baseline: state.source,
+      written: state.written,
+      edits: edits,
+      conflicts: state.conflicts.map(function (x) {
+        return { kind: x.kind, base: x.base, theirs: x.theirs, mine: x.mine, by: x.by, ai: x.ai, model: x.model };
+      }),
+      outside: state.outside.map(function (o) { return { before: o.before, after: o.after, at: o.at }; }),
+      earlier: state.earlier.concat(state.earlierThisLoad || []),
+    };
+  }
+
+  /*
+   * Ask before putting anything back. Only when there is something to ask
+   * about: unsaved edits, or a file that changed since. A kept history with
+   * nothing pending comes back without a question.
+   */
+  function offerResume() {
+    var prior = state.prior;
+    if (!prior || !state.active || state.resumePending) return;
+    var reference = prior.written != null ? prior.written : prior.baseline;
+    var changed = reference !== state.source;
+    var pending = prior.edits.length + (prior.conflicts || []).length;
+    if (!pending && !changed) { resume(true); return; }
+
+    state.resumePending = true;
+    var box = ensureAssist().resume;
+    box.textContent = '';
+    var title = doc().createElement('strong');
+    title.textContent = 'Carry on where you left off?';
+    box.appendChild(title);
+    var when = new Date(prior.at);
+    var p = doc().createElement('div');
+    p.className = 'c-note';
+    p.textContent = 'You were editing this ' + when.toLocaleString(undefined,
+        { weekday: 'short', hour: 'numeric', minute: '2-digit' }) +
+      (prior.edits.length ? ', with ' + prior.edits.length + ' unsaved change' + (prior.edits.length === 1 ? '' : 's') : '') +
+      '.' + (changed ? ' The file has been changed since, outside VibeRevise. Your changes go back ' +
+        'where the file is as it was; anywhere it was changed shows as a clash for you to settle.' : '');
+    box.appendChild(p);
+    var tools = doc().createElement('div');
+    tools.className = 'r-tools';
+    var go = doc().createElement('button');
+    go.className = 'pill primary';
+    go.textContent = 'Carry on';
+    go.addEventListener('click', function () { resume(true); });
+    var fresh = doc().createElement('button');
+    fresh.className = 'pill';
+    fresh.textContent = 'Start fresh';
+    fresh.title = 'Forget the earlier session and its unsaved changes';
+    fresh.addEventListener('click', function () { resume(false); });
+    tools.appendChild(go);
+    tools.appendChild(fresh);
+    box.appendChild(tools);
+    box.hidden = false;
+  }
+
+  function resume(carryOn) {
+    var prior = state.prior;
+    state.prior = null;
+    state.resumePending = false;
+    if (state.assist) state.assist.resume.hidden = true;
+    if (!prior) return null;
+    if (!carryOn) {
+      Promise.resolve(state.session && state.session.clear()).catch(function () {});
+      flash('Started fresh');
+      return null;
+    }
+    var result = restoreSession(prior);
+    refresh();
+    saveSessionNow();
+    var bits = [];
+    if (result.restored) bits.push(result.restored + ' change' + (result.restored === 1 ? '' : 's') + ' put back');
+    if (state.conflicts.length) bits.push(state.conflicts.length + ' clash' + (state.conflicts.length === 1 ? '' : 'es') + ' to settle');
+    if (result.outside) bits.push(result.outside + ' change' + (result.outside === 1 ? '' : 's') + ' made outside VibeRevise');
+    if (bits.length) {
+      flash(bits.join(' · '));
+      if (state.conflicts.length || result.outside) openChanges();
+    }
+    return result;
+  }
+
+  // Elements by where their tags are in the current source.
+  function elementsBy(field) {
+    // The element map is weak, so walk the page and ask it about each one.
+    var out = new Map();
+    var all = doc().getElementsByTagName('*');
+    for (var i = 0; i < all.length; i++) {
+      var range = state.map.elements.get(all[i]);
+      var at = range && field(range);
+      if (at != null && !out.has(at)) out.set(at, all[i]);
+    }
+    return out;
+  }
+
+  function restoreSession(prior) {
+    var Rebase = root.VibeReviseRebase;
+    var d = Rebase.diff(prior.baseline, state.source);
+    var reference = prior.written != null ? prior.written : prior.baseline;
+    var dOut = reference === prior.baseline ? d : Rebase.diff(reference, state.source);
+
+    var texts = state.regions.filter(function (r) { return r.kind === 'text'; });
+    var byStart = new Map(texts.map(function (r) { return [r.record.span.start, r]; }));
+    var endingAt = elementsBy(function (r) { return r.endTag ? r.endTag.end : null; });
+    var closingAt = elementsBy(function (r) { return r.endTag ? r.endTag.start : null; });
+    var openingAt = elementsBy(function (r) { return r.startTag ? r.startTag.start : null; });
+    var chain = new Map();          // anchor offset -> the last thing put there
+    var used = new Set();
+    var restored = 0;
+    var conflicts = (prior.conflicts || []).slice();
+
+    function apply(r, e) {
+      Islands.writeValue(r.island, e.mine);
+      r.current = e.mine;
+      r.by = e.by;
+      r.ai = !!e.ai;
+      r.aiModel = e.model;
+      r.humanToo = !!e.human;
+      markChanged(r);
+      used.add(r);
+      restored++;
+    }
+    // Where an edit's words went, if the file moved them but did not change
+    // them: one run, and only one, still holding exactly what it held.
+    function findUnchanged(expected, among) {
+      if (String(expected).length < 3) return null;
+      var hits = among.filter(function (r) {
+        return !used.has(r) && r.current === expected && r.current === r.original;
+      });
+      return hits.length === 1 ? hits[0] : null;
+    }
+    function inHunk(h) {
+      return h ? texts.filter(function (r) {
+        return r.record.span.start >= h.bStart && r.record.span.end <= h.bEnd;
+      }) : [];
+    }
+    function clash(kind, e, near) {
+      var best = null, score = 0.3;
+      near.forEach(function (r) {
+        if (used.has(r)) return;
+        var sc = Rebase.similarity(e.expected, r.current);
+        if (sc > score) { score = sc; best = r; }
+      });
+      conflicts.push({ kind: kind, base: e.expected || '', theirs: best ? best.current : null,
+        mine: e.mine, region: best, by: e.by, ai: e.ai, model: e.model });
+    }
+
+    state.restoring = true;
+    try {
+      prior.edits.forEach(function (e) {
+        if (e.k === 'text') {
+          var m = Rebase.mapRange(d, e.start, e.end);
+          var r = m && byStart.get(m.start);
+          if (r && r.record.span.end === m.end && r.current === e.expected && !used.has(r)) { apply(r, e); return; }
+          var h = Rebase.hunkAt(d, e.start);
+          var near = inHunk(h);
+          var found = findUnchanged(e.expected, near);
+          if (found) { apply(found, e); return; }
+          clash('text', e, near.length ? near : texts);
+        } else if (e.k === 'found') {
+          var f = e.expected.length >= 12 ? findUnchanged(e.expected, texts.concat(
+            state.regions.filter(function (x) { return x.kind === 'cell'; }))) : null;
+          if (f) apply(f, e); else clash('text', e, texts);
+        } else if (e.k === 'insert' || e.k === 'tree') {
+          var at = Rebase.mapPoint(d, e.anchor);
+          var host = at == null ? null
+            : chain.get(at) || (e.inside ? closingAt.get(at) : endingAt.get(at));
+          if (!host) {
+            conflicts.push({ kind: 'added', base: '', theirs: null,
+              mine: e.k === 'tree' ? e.cells.filter(Boolean).join(' · ') : e.mine, by: e.by });
+            return;
+          }
+          if (e.k === 'insert') {
+            var added = addAfterBlock(host, { template: e.template, text: e.mine, quiet: true });
+            if (!added) return;
+            added.by = e.by; added.ai = !!e.ai; added.aiModel = e.model;
+            markChanged(added);
+            chain.set(at, added.element);
+          } else {
+            var tree = insertStructure(e.id, host);
+            if (!tree) return;
+            tree.cells.forEach(function (c, i) {
+              if (!e.cells[i]) return;
+              Islands.writeValue(c.island, e.cells[i]);
+              c.current = e.cells[i];
+              c.by = e.by;
+              markChanged(c);
+            });
+            if (!e.inside) chain.set(at, tree.element);
+          }
+          restored++;
+        } else if (e.k === 'comment-new') {
+          var pt = Rebase.mapPoint(d, e.anchor);
+          var block = pt == null ? null : openingAt.get(pt);
+          var c = block && addCommentTo(block, { text: e.text, author: e.author });
+          if (c) { c.date = e.date; restored++; }
+          else conflicts.push({ kind: 'comment', base: '', theirs: null, mine: e.text, by: e.author });
+        } else if (e.k === 'comment-change') {
+          var cm = state.comments.find(function (x) { return x.original === e.expected && !used.has(x); });
+          if (cm) {
+            used.add(cm);
+            cm.text = e.removed ? cm.text : e.text;
+            cm.removed = !!e.removed;
+            restored++;
+          } else if (!e.removed) {
+            conflicts.push({ kind: 'comment', base: e.expected, theirs: null, mine: e.text });
+          }
+        }
+      });
+    } finally {
+      state.restoring = false;
+    }
+
+    // What the other tool did, for the list of changes.
+    var now = Date.now();
+    var outside = [];
+    dOut.hunks.forEach(function (h) {
+      var before = Rebase.textOf(reference.slice(h.aStart, h.aEnd));
+      var after = Rebase.textOf(state.source.slice(h.bStart, h.bEnd));
+      if (before === after) return;
+      var t = texts.find(function (r) { return r.record.span.start >= h.bStart && r.record.span.start < h.bEnd; });
+      outside.push({ before: before, after: after, at: now,
+        target: t ? (Blocks.blockFor(t.island) || t.island) : null });
+    });
+
+    state.history = [];
+    state.historyAt = 0;
+    state.conflicts = conflicts;
+    state.outside = (prior.outside || []).concat(outside);
+    state.earlier = prior.earlier || [];
+    renderRail();
+    positionCards();
+    return { restored: restored, conflicts: conflicts.length, outside: outside.length };
+  }
+
+  /*
+   * Settle a clash. Mine: the user's words go onto the run the other tool's
+   * version is in, as an ordinary edit (one undo step). Theirs: the edit is
+   * dropped, and the file keeps what the other tool wrote.
+   */
+  function settleConflict(x, keepMine) {
+    var at = state.conflicts.indexOf(x);
+    if (at === -1) return false;
+    if (keepMine) {
+      var r = x.region;
+      if (!r || !r.island.isConnected) { flash('There is nowhere left to put that — copy it instead'); return false; }
+      var before = r.current;
+      Islands.writeValue(r.island, x.mine);
+      state.lastTouch = 0;
+      recordChange(r.island, before);
+    }
+    state.conflicts.splice(at, 1);
+    refresh();
+    renderChanges();
+    return true;
+  }
+
   // --- lifecycle -------------------------------------------------------------
 
   function setActive(next) {
@@ -3944,6 +4446,7 @@
       if (!state.regions.length) {
         buildRegions();
         buildComments();
+        if (state.prior) setTimeout(offerResume, 0);   // once the bar exists
       } else {
         state.regions.forEach(function (r) { r.island.setAttribute('contenteditable', 'true'); });
       }
@@ -4041,7 +4544,30 @@
   }
 
   function init(options) {
+    // A different document, or the same one read again: start from nothing,
+    // rather than carrying regions that belong to a page that is gone.
+    if (options.fresh) {
+      if (state.active) setActive(false);
+      clearTimeout(state.sessionTimer);
+      state = makeState();
+    }
     state.doc = options.doc || null;
+    // Where this document's session is kept between reloads, if the host keeps one.
+    state.session = options.session || null;
+    state.prior = null;
+    if (state.session) {
+      var asked = state;
+      Promise.resolve(state.session.load()).then(function (prior) {
+        if (state !== asked) return;      // a fresh start since
+        if (prior && prior.v === 1 && Date.now() - prior.at < SESSION_DAYS * 864e5) {
+          state.prior = prior;
+          if (state.active) offerResume();
+        } else if (prior) {
+          Promise.resolve(state.session.clear()).catch(function () {});
+        }
+        state.sessionRead = true;
+      }).catch(function () { state.sessionRead = true; /* nothing kept is fine */ });
+    }
     state.settings = options.settings || null;
     state.author = options.author || '';
     if (state.settings) {
@@ -4119,6 +4645,11 @@
     changes: collectChanges,
     openChanges: openChanges,
     revertChange: revertChange,
+    sessionSnapshot: sessionSnapshot,
+    resume: resume,
+    conflicts: function () { return state.conflicts.slice(); },
+    outsideChanges: function () { return state.outside.slice(); },
+    settleConflict: settleConflict,
     changeHeading: changeHeading,
     atEndOfBlock: atEndOfBlock,
     addCommentTo: addCommentTo,
