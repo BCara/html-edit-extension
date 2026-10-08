@@ -178,6 +178,7 @@ the `×` on its card; a comment left empty is not written at all.
 
 | Key | |
 | --- | --- |
+| `Ctrl`/`Cmd` + `B` / `I`, or **B** and ***I*** on the bar | Bold or italic for the selected words: `<strong>` or `<em>` around exactly them, and nothing else in the file changes. Again on the same words takes it off. Inside bold or italic that was already in the file, it takes it off that whole phrase (its two tags go; everything between them stays). The selection has to stay inside one stretch of text: across a link or other formatting it is refused, because the new tags would cross the old ones. |
 | `Ctrl`/`Cmd` + `Shift` + `S` | Save as… somewhere else, and keep saving there |
 | `Ctrl`/`Cmd` + `S` | Save, from anywhere: the document, a comment, a box on the bar, while paused, or after **Done** with changes unsaved |
 | `Ctrl`/`Cmd` + `Z` | Undo (including undoing an added block) |
@@ -483,10 +484,11 @@ offset.
 
 - **Text, blocks, structures and comments.** You can change words, add another
   block like one that is already there, insert a table or list copied from one
-  the document already has, attach comments, and take out a paragraph or heading
-  you have emptied. You cannot move or resize elements, delete anything with
-  words still in it, change CSS, classes, attributes or styles, or replace
-  images. That restraint is the feature; each addition was made deliberately,
+  the document already has, attach comments, make words bold or italic (or
+  take that off), and take out a paragraph or heading you have emptied. You
+  cannot move or resize elements, delete anything with words still in it,
+  change CSS, classes, attributes or styles, underline or colour text, or
+  replace images. That restraint is the feature; each addition was made deliberately,
   after the fact.
 - **No overwrite in place.** Chrome cannot write to a `file://` path. See
   [Using it](#using-it).

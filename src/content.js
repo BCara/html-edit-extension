@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.16.0';
+  var VERSION = '0.17.0';
   var REQUIRED = [
     'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
     'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',

@@ -123,6 +123,22 @@ async function run() {
     ok(!D.getElementById('c').hasAttribute('data-vr-outside'), 'and nothing it left alone');
   }
 
+  heading('outside changes survive stopping and starting editing');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    open(V2, store);
+    await settle();
+    eq(E.outsideChanges().length, 2, 'two outside changes to begin with');
+    E.setActive(false);
+    ok(!D.querySelector('[data-vr-outside]'), 'stopping editing takes the highlights off');
+    E.setActive(true);
+    await settle();
+    eq(E.outsideChanges().length, 2, 'starting again, they are still listed');
+    ok(D.querySelector('[data-vr-outside]'), 'and highlighted again');
+  }
+
   heading('several rounds of changes: one entry per paragraph, since the last review');
   {
     const store = memoryStore();
@@ -333,6 +349,23 @@ async function run() {
     D.activeElement.dispatchEvent(ev);
     await settle();
     eq(calls.join(), 'false,true,true', 'Save writes where it was, Save as and Ctrl/Cmd+Shift+S ask for somewhere new');
+  }
+
+  heading('bold and italic come back after a reload');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    const isl = island('#c');
+    isl.focus();
+    const at = VibeReviseIslands.readValue(isl).indexOf('March');
+    VibeReviseIslands.select(isl, at, at + 5);
+    ok(E.toggleFormat('b'), 'a word made bold');
+    await new Promise((r) => setTimeout(r, 800));
+    open(V2, store);
+    await settle();
+    E.resume(true);
+    ok(E.preview().indexOf('clear by <strong>March</strong>.</p>') !== -1, 'is still bold in the other tool\u2019s version');
   }
 
   heading('starting fresh forgets it');

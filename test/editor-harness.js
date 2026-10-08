@@ -1407,6 +1407,90 @@ async function run() {
     eq(VibeReviseEditor.preview(), start, 'and the file exactly as it was');
   }
 
+  heading('bold and italic: on and off for the selected words');
+  {
+    VibeReviseEditor.setActive(true);
+    const before = VibeReviseEditor.preview();
+    const island = islandFor('#p5');
+    const text = valueOf(island);
+    const at = text.indexOf('carrying');
+    island.focus();
+    VibeReviseIslands.select(island, at, at + 'carrying'.length);
+    ok(VibeReviseEditor.toggleFormat('b'), 'Bold on a selection');
+    ok(VibeReviseEditor.preview().indexOf('<p class="note" id="p5">A paragraph <strong>carrying</strong> a class.</p>') !== -1,
+       'puts <strong> around exactly those words in the file');
+    ok(document.querySelector('#p5 strong[data-vr-fmt]'), 'and shows them bold on the page');
+    const row = VibeReviseEditor.changes().find((c) => c.target === document.getElementById('p5'));
+    ok(row && / · bold or italic$/.test(VibeReviseEditor.changeHeading(row)), 'the list of changes says what it was');
+
+    // The selection is kept, so pressing it again takes it off.
+    ok(VibeReviseEditor.toggleFormat('b'), 'Bold again on the same words');
+    eq(VibeReviseEditor.preview(), before, 'takes it off, leaving the file as it was');
+
+    VibeReviseEditor.undo();
+    ok(VibeReviseEditor.preview().indexOf('<strong>carrying</strong>') !== -1, 'undo puts it back');
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), before, 'and undo again takes it away');
+
+    // Off for part of it: the rest stays bold.
+    island.focus();
+    const whole = valueOf(island).indexOf('paragraph carrying');
+    VibeReviseIslands.select(island, whole, whole + 'paragraph carrying'.length);
+    VibeReviseEditor.toggleFormat('b');
+    const v = valueOf(island);
+    const c = VibeReviseIslands.plain(v).indexOf('carrying');
+    // Select "carrying" inside the bold: its index in the value is one past, for the mark.
+    VibeReviseIslands.select(island, c + 1, c + 1 + 'carrying'.length);
+    VibeReviseEditor.toggleFormat('b');
+    ok(VibeReviseEditor.preview().indexOf('A <strong>paragraph </strong>carrying a class.') !== -1,
+       'taking it off part of a bold run leaves the rest bold');
+    VibeReviseEditor.undo();
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), before, 'and both steps undo');
+
+    // Italic, through the keyboard.
+    island.focus();
+    VibeReviseIslands.select(island, at, at + 'carrying'.length);
+    press('i', { ctrlKey: true });
+    ok(VibeReviseEditor.preview().indexOf('A paragraph <em>carrying</em> a class.') !== -1, 'Ctrl/Cmd+I makes it italic');
+    VibeReviseEditor.undo();
+  }
+
+  heading('bold from the file comes off its whole phrase, tags only');
+  {
+    const before = VibeReviseEditor.preview();
+    const bold = document.querySelector('#p1 strong');
+    const run = bold.querySelector('[data-vr-island]');
+    run.focus();
+    VibeReviseIslands.select(run, 1, 3);
+    ok(VibeReviseEditor.toggleFormat('b'), 'Bold inside the file’s own bold');
+    const after = VibeReviseEditor.preview();
+    ok(after.indexOf('<strong>bold') === -1 && after.indexOf('</em></strong>') === -1,
+       'its <strong> tags are gone from the file');
+    ok(after.indexOf('bold <em>and italic</em>') !== -1, 'and everything inside them is exactly as it was');
+    ok(!bold.isConnected, 'and from the page');
+    const row = VibeReviseEditor.changes().find((c) => c.kind === 'unformat');
+    ok(row && /took bold off/.test(VibeReviseEditor.changeHeading(row)), 'the list of changes says so');
+    VibeReviseEditor.undo();
+    eq(VibeReviseEditor.preview(), before, 'undo puts the bold back');
+    ok(bold.isConnected, 'on the page too');
+  }
+
+  heading('bold that would cross other formatting is refused');
+  {
+    const before = VibeReviseEditor.preview();
+    const first = islandFor('#p1');
+    const inBold = document.querySelector('#p1 strong [data-vr-island]');
+    const range = document.createRange();
+    range.setStart(first.firstChild, 0);
+    range.setEnd(inBold.firstChild, 2);
+    const sel = document.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    ok(!VibeReviseEditor.toggleFormat('i'), 'a selection from plain text into bold is not made italic');
+    eq(VibeReviseEditor.preview(), before, 'and the file is untouched');
+  }
+
   // --- AI suggestions, through a fake provider ---------------------------------
 
   /*

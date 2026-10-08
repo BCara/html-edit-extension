@@ -86,7 +86,7 @@ PRIVACY
 
 VibeRevise has no servers and collects nothing: no analytics, no accounts. It talks to the server your own document came from, to read it and, if you ask, save it back.
 
-AI is optional and off by default. Add an API key for Claude, OpenAI, OpenRouter, Gemini, or a model on your own computer, and you can ask it to explain a passage, rewrite a paragraph, proofread the document or reply to a comment. Only then, and only when you press the button, are the words of those paragraphs sent, straight to the service you chose. AI never changes the document on its own: on Read, the default, it only advises and you make every change; on Read and write, a suggestion is applied only when you press Accept. The markup is never touched.
+AI is optional and off by default. Add an API key for Claude, OpenAI, OpenRouter, Gemini, or a model on your own computer, and you can ask it to explain a passage, rewrite a paragraph, proofread the document or reply to a comment. Only then, and only when you press the button, are the words of those paragraphs sent, straight to the service you chose. AI never changes the document on its own: on Read, the default, it only advises and you make every change; on Read and write, a suggestion is applied only when you press Accept. The markup is never touched, except where you ask: bold and italic for the words you select, and the paragraphs, lists and tables you add.
 
 If another program changes the file while you are editing, VibeRevise notices, brings the changes in with your unsaved edits carried over, highlights what the other program changed so you can review it, and will not save over changes it has not shown you.
 

@@ -388,7 +388,7 @@
   }
 
   function toModel(run) {
-    return splitEdges(run).core
+    return splitEdges(String(run || '').replace(/[\u0002-\u0005]/g, '')).core
       .replace(/[ \t\r\n\f]+/g, ' ')
       .split(BR).map(function (line) { return line.trim(); }).join('\n');
   }

@@ -167,6 +167,7 @@
     diskDismissed: null,  // a change the user said "later" to
     earlier: [],          // changes saved before the last reload, as rows to show
     removals: [],         // emptied blocks from the file, taken out with Delete
+    unwraps: [],          // bold or italic from the file, taken off a whole phrase
   }; }
   var state = makeState();
 
@@ -260,7 +261,8 @@
     // Paused: only what still makes sense with editing off. Save stays, because
     // the edits are still there and still unsaved.
     '.bar.paused .dot { background: #d9a01e; }',
-    '.bar.paused .insert, .bar.paused .menu, .bar.paused .undo, .bar.paused .redo,',
+    '.bar.paused .insert, .bar.paused .menu, .bar.paused .undo, .bar.paused .redo, .bar.paused .fmt,',
+    '.fmt { min-width: 26px; padding-left: 7px; padding-right: 7px; font-family: Georgia, serif; }',
     '.bar.paused .more-btn, .bar.paused .panel, .bar.paused .ai-btn, .bar.paused .sep,',
     '.bar.paused .outside-btn { display: none; }',
     '.outside-btn { color: #9fd6ef; }',
@@ -370,7 +372,8 @@
       var r = state.regions[i];
       if (!r.removed && r.current !== r.original && r.island.isConnected) n++;
     }
-    return n + commentChangedCount() + state.removals.filter(function (x) { return x.active; }).length;
+    return n + commentChangedCount() + state.removals.filter(function (x) { return x.active; }).length +
+      state.unwraps.filter(function (x) { return x.active; }).length;
   }
 
   function unsavedCount() {
@@ -380,7 +383,8 @@
       if (!r.removed && r.current !== r.saved && r.island.isConnected) n++;
     }
     return n + commentUnsavedCount() +
-      state.removals.filter(function (x) { return x.active !== x.saved; }).length;
+      state.removals.filter(function (x) { return x.active !== x.saved; }).length +
+      state.unwraps.filter(function (x) { return x.active !== x.saved; }).length;
   }
 
   // Added blocks the user never typed into. They are not written to the file,
@@ -478,6 +482,171 @@
     var caret = Islands.caretIndex(island);
     Islands.writeValue(island, Islands.readValue(island));
     if (caret != null) Islands.setCaret(island, caret);
+  }
+
+
+  // --- bold and italic --------------------------------------------------------
+
+  /*
+   * Ctrl/Cmd+B, Ctrl/Cmd+I, or the B and I on the bar.
+   *
+   * Adding: the selected words get <strong> or <em> around exactly them, as
+   * marks in their run's value (see islands.js), so it is an ordinary edit:
+   * one undo step, in the list of changes, kept through a reload.
+   *
+   * Taking off: formatting the user added comes off just the selected words.
+   * Bold or italic that was in the file comes off its whole phrase: its two
+   * tags are cut, and nothing between them is touched. Taking it off part of
+   * a phrase would mean splitting the file's tags in two, so that is refused.
+   *
+   * A selection must stay inside one run of text. Across a link or existing
+   * formatting, the new tags would cross the old ones and break the file.
+   */
+  var FMT_TAGS = { b: ['strong', 'b'], i: ['em', 'i'] };
+  var FMT_NAME = { b: 'bold', i: 'italic' };
+
+  function marksAt(value, at) {
+    var stack = [];
+    for (var i = 0; i < at; i++) {
+      var ch = value.charAt(i);
+      if (ch === '\u0002') stack.push('b');
+      else if (ch === '\u0004') stack.push('i');
+      else if (ch === '\u0003' || ch === '\u0005') stack.pop();
+    }
+    return stack;
+  }
+
+  // The index in `value` where `count` characters of words (marks not
+  // counted) have gone by; inside any marks there if `inside`, else before.
+  function indexOfText(value, count, inside) {
+    var seen = 0;
+    for (var i = 0; i <= value.length; i++) {
+      var ch = value.charAt(i);
+      var mark = /[\u0002-\u0005]/.test(ch);
+      if (seen === count) {
+        if (!inside || !mark) return i;
+      }
+      if (i < value.length && !mark) seen++;
+    }
+    return value.length;
+  }
+
+  function fileFormatAround(island, kind) {
+    var block = Blocks.blockFor(island);
+    for (var el = island.parentElement; el && el !== block; el = el.parentElement) {
+      if (FMT_TAGS[kind].indexOf(el.localName) !== -1 && !el.hasAttribute(Islands.FMT_ATTR)) return el;
+    }
+    return null;
+  }
+
+  function toggleFormat(kind) {
+    if (!state.active || state.paused) return false;
+    var sel = doc().getSelection();
+    var range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    var island = range && islandOf(range.startContainer);
+    var name = FMT_NAME[kind];
+    if (!island || !regionOf(island)) { flash('Select some words first, then ' + (kind === 'b' ? 'Bold' : 'Italic')); return false; }
+    if (islandOf(range.endContainer) !== island) {
+      flash('Select words within one stretch of text \u2014 ' + name + ' cannot cross a link or other formatting');
+      return false;
+    }
+
+    // In the file already: take it off the whole phrase.
+    var fromFile = fileFormatAround(island, kind);
+    if (fromFile) return unwrapFormat(fromFile, kind);
+
+    var value = normaliseFormat(Islands.readValue(island));
+    var s = Islands.indexAt(island, range.startContainer, range.startOffset);
+    var e = Islands.indexAt(island, range.endContainer, range.endOffset);
+    if (s > e) { var t = s; s = e; e = t; }
+    if (s === e) { flash('Select the words to make ' + name + ' first'); return false; }
+    var atS = marksAt(value, s), atE = marksAt(value, e);
+    if (atS.join() !== atE.join()) {
+      flash('The selection starts and ends in different formatting \u2014 select inside it, or around all of it');
+      return false;
+    }
+
+    var M = Islands.MARK;
+    var open = M[kind][0], close = M[kind][1];
+    var textS = Islands.plain(value.slice(0, s)).length;
+    var textE = Islands.plain(value.slice(0, e)).length;
+    var next;
+    var at = atS.indexOf(kind);
+    if (at !== -1) {
+      // Off, for just these words: close it here, open it again after, with
+      // anything nested inside it closed and reopened around that.
+      var inner = atS.slice(at + 1);
+      var closes = inner.slice().reverse().map(function (k) { return M[k][1]; }).join('');
+      var opens = inner.map(function (k) { return M[k][0]; }).join('');
+      next = value.slice(0, s) + closes + close + opens + value.slice(s, e) +
+             closes + open + opens + value.slice(e);
+    } else {
+      // On: any of the same kind inside the selection is folded into it.
+      var middle = value.slice(s, e).split(open).join('').split(close).join('');
+      next = value.slice(0, s) + open + middle + close + value.slice(e);
+    }
+    next = normaliseFormat(next);
+    if (next === value) return false;
+
+    Islands.writeValue(island, next);
+    state.lastTouch = 0;
+    recordChange(island, value);
+    island.focus();
+    Islands.select(island, indexOfText(next, textS, at === -1), indexOfText(next, textE, false));
+    flash(at === -1 ? 'Made ' + name : 'Took ' + name + ' off');
+    return true;
+  }
+
+  function unwrapFormat(el, kind) {
+    var range = state.map.elements.get(el);
+    if (!range || !range.startTag || !range.endTag) {
+      flash('VibeRevise cannot tell where this ' + FMT_NAME[kind] + ' ends in the file, so it stays');
+      return false;
+    }
+    var item = makeUnwrap(el, kind);
+    pushHistory({ kind: 'unwrap', item: item });
+    setUnwrap(item, true);
+    flash('Took ' + FMT_NAME[kind] + ' off \u201c' + item.text.slice(0, 40) + '\u201d \u2014 the whole phrase, as it was in the file');
+    return true;
+  }
+
+  function makeUnwrap(el, kind) {
+    var range = state.map.elements.get(el);
+    var item = {
+      element: el,
+      kind: kind,
+      open: { start: range.startTag.start, end: range.startTag.end },
+      close: { start: range.endTag.start, end: range.endTag.end },
+      text: el.textContent,
+      children: [],
+      active: false,
+      saved: false,
+      by: authorName(),
+    };
+    state.unwraps.push(item);
+    return item;
+  }
+
+  // Off: the element's children take its place. On: it goes back around them.
+  function setUnwrap(item, on) {
+    if (on === item.active) return;
+    var el = item.element;
+    if (on) {
+      item.children = Array.prototype.slice.call(el.childNodes);
+      var parent = el.parentNode;
+      item.children.forEach(function (c) { parent.insertBefore(c, el); });
+      parent.removeChild(el);
+    } else {
+      var first = item.children[0];
+      if (first && first.parentNode) {
+        first.parentNode.insertBefore(el, first);
+        item.children.forEach(function (c) { el.appendChild(c); });
+      }
+    }
+    item.active = on;
+    state.lastTouch = 0;
+    refresh();
+    positionCards();
   }
 
   // --- adding blocks ---------------------------------------------------------
@@ -805,11 +974,25 @@
     state.lastTouch = 0;
   }
 
+  /*
+   * Tidy the formatting marks: an emptied bold run goes, and two bold runs
+   * that now touch become one. Deleting across formatting leaves both behind,
+   * and neither should reach the file as <strong></strong>.
+   */
+  function normaliseFormat(value) {
+    var prev;
+    do {
+      prev = value;
+      value = value.replace(/\u0002\u0003|\u0004\u0005|\u0003\u0002|\u0005\u0004/g, '');
+    } while (value !== prev);
+    return value;
+  }
+
   function recordChange(island, explicitBefore, explicitCaret) {
     var region = regionOf(island);
     if (!region) return;
 
-    var after = Islands.readValue(island);
+    var after = normaliseFormat(Islands.readValue(island));
     if (after === region.current) return;
 
     var before = explicitBefore !== undefined ? explicitBefore : region.current;
@@ -937,6 +1120,8 @@
     else if (entry.kind === 'remove-added') setAdded(entry.region, true);
     else if (entry.kind === 'remove-block') setRemoval(entry.item, false);
     else if (entry.kind === 'restore-block') setRemoval(entry.item, true);
+    else if (entry.kind === 'unwrap') setUnwrap(entry.item, false);
+    else if (entry.kind === 'rewrap') setUnwrap(entry.item, true);
     else if (entry.kind === 'multi') applyMulti(entry, false);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, true);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, false);
@@ -950,6 +1135,8 @@
     else if (entry.kind === 'remove-added') setAdded(entry.region, false);
     else if (entry.kind === 'remove-block') setRemoval(entry.item, true);
     else if (entry.kind === 'restore-block') setRemoval(entry.item, false);
+    else if (entry.kind === 'unwrap') setUnwrap(entry.item, true);
+    else if (entry.kind === 'rewrap') setUnwrap(entry.item, false);
     else if (entry.kind === 'multi') applyMulti(entry, true);
     else if (entry.kind === 'comment-add') setCommentRemoved(entry.region, false);
     else if (entry.kind === 'comment-remove') setCommentRemoved(entry.region, true);
@@ -989,11 +1176,12 @@
 
     if (ALLOWED_INPUT.indexOf(type) === -1) {
       e.preventDefault();
-      if (type.lastIndexOf('format', 0) === 0) {
-        // Bold, italic, colours, indentation, alignment: all of it would mean
-        // new markup or new attributes, which is exactly what VibeRevise does
-        // not do.
-        flash('VibeRevise changes words, not formatting');
+      if (type === 'formatBold' || type === 'formatItalic') {
+        toggleFormat(type === 'formatBold' ? 'b' : 'i');
+      } else if (type.lastIndexOf('format', 0) === 0) {
+        // Colours, underline, indentation, alignment: new markup or new
+        // attributes VibeRevise does not write. Bold and italic it does, above.
+        flash('VibeRevise does bold and italic, but not that kind of formatting');
       } else if (type === 'insertFromDrop') {
         flash('Drag and drop is not supported — copy and paste instead');
       } else {
@@ -1117,7 +1305,7 @@
    * so no key press here can remove a single byte of the original document.
    */
   function blank(value) {
-    return !value || !value.split(Islands.BR).join('').trim();
+    return !value || !Islands.plain(value).split(Islands.BR).join('').trim();
   }
 
   function emptyAddedHere() {
@@ -1387,6 +1575,7 @@
     var key = (e.key || '').toLowerCase();
 
     if (key === 's') { e.preventDefault(); if (e.shiftKey) saveAs(); else save(); return; }
+    if ((key === 'b' || key === 'i') && !e.shiftKey) { e.preventDefault(); toggleFormat(key); return; }
     if (key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
     if ((key === 'z' && e.shiftKey) || key === 'y') { e.preventDefault(); redo(); return; }
 
@@ -2327,6 +2516,8 @@
         '<button class="count" title="Show what has changed"></button>' +
         '<span class="msg"></span>' +
         '<span class="sep"></span>' +
+        '<button class="fmt fmt-b" title="Bold (Ctrl/Cmd+B)" aria-label="Bold"><b>B</b></button>' +
+        '<button class="fmt fmt-i" title="Italic (Ctrl/Cmd+I)" aria-label="Italic"><i>I</i></button>' +
         '<button class="insert" title="Add a table, a list, a heading">Insert \u25be</button>' +
         '<div class="menu" hidden>' +
           Structures.KINDS.map(function (k) {
@@ -2381,6 +2572,8 @@
       count: shadow.querySelector('.count'),
       msg: shadow.querySelector('.msg'),
       insert: shadow.querySelector('.insert'),
+      fmtB: shadow.querySelector('.fmt-b'),
+      fmtI: shadow.querySelector('.fmt-i'),
       menu: shadow.querySelector('.menu'),
       undo: shadow.querySelector('.undo'),
       redo: shadow.querySelector('.redo'),
@@ -2415,6 +2608,10 @@
     // the caret out of the text. currentBlock() can recover from that, but not
     // losing it in the first place is better: the page does not jump and the
     // user's selection survives.
+    // mousedown with the default prevented: the selection being formatted
+    // must still be there when the button acts on it.
+    ui.fmtB.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); toggleFormat('b'); });
+    ui.fmtI.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); toggleFormat('i'); });
     ui.insert.addEventListener('mousedown', function (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -2447,9 +2644,12 @@
       e.stopPropagation();
       toggleChanges();
     });
+    // The bubble opens the panel, and the panel opens the list of changes;
+    // pressed again, the bubble closes whichever of them is open.
     ui.moreBtn.addEventListener('mousedown', function (e) {
       e.preventDefault();
       e.stopPropagation();
+      if (isChangesOpen()) { closeChanges(); setMoreOpen(false); return; }
       setMoreOpen(ui.panel.hidden);
     });
     // The panel holds a text field, so it must take focus and keep it: stop
@@ -2631,6 +2831,11 @@
     }
     // Each group's before and after is the whole block's text, unchanged runs
     // included, so the diff shows the edit in the sentence it belongs to.
+    state.unwraps.forEach(function (x) {
+      if (x.active) list.push({ kind: 'unformat', what: FMT_NAME[x.kind], before: x.text, after: x.text,
+                                by: x.by, target: Blocks.blockFor(x.children[0] && x.children[0].nodeType === 1
+                                  ? x.children[0] : (x.children[0] && x.children[0].parentElement)) || null, item: x });
+    });
     byBlock.forEach(function (group, block) {
       var runs = [];
       var islands = block.querySelectorAll ? block.querySelectorAll('[' + Islands.ATTR + ']') : [];
@@ -2641,6 +2846,7 @@
       if (!runs.length) runs = state.regions.filter(function (x) { return x.island === block; });
       group.before = runs.map(function (x) { return x.original; }).join('');
       group.after = runs.map(function (x) { return x.current; }).join('');
+      group.formatOnly = Islands.plain(group.before) === Islands.plain(group.after);
     });
 
     for (i = 0; i < state.trees.length; i++) {
@@ -2685,17 +2891,18 @@
       var bot = ch.model ? 'AI (' + ch.model + ')' : 'AI';
       if (ch.ai && ch.human) return who + ' and ' + bot + ' · edited';
       if (ch.ai) return bot + ' · edited · accepted by ' + who;
-      return who + ' · edited';
+      return who + (ch.formatOnly ? ' · bold or italic' : ' · edited');
     }
     if (ch.kind === 'added') return who + ' · added a ' + ch.what + ai;
     if (ch.kind === 'removed') return who + ' · removed an empty ' + ch.what;
+    if (ch.kind === 'unformat') return who + ' · took ' + ch.what + ' off';
     if (ch.kind === 'comment-add') return who + ' · added a comment';
     if (ch.kind === 'comment-edit') return 'Comment edited' + (ch.by ? ' (' + ch.by + '’s)' : '');
     return 'Comment deleted' + (ch.by ? ' (' + ch.by + '’s)' : '');
   }
 
   // For display only: a <br> in an island's value reads as a return arrow.
-  function visible(value) { return String(value || '').split(Islands.BR).join(' ↵ '); }
+  function visible(value) { return Islands.plain(value).split(Islands.BR).join(' ↵ '); }
 
   /*
    * Which words changed, as [{ op: 'same'|'del'|'add', text }].
@@ -2784,6 +2991,9 @@
       pushHistory(entry);
       applyMulti(entry, true);
       renderReview();         // a suggestion for that paragraph is stale now
+    } else if (ch.kind === 'unformat') {
+      pushHistory({ kind: 'rewrap', item: ch.item });
+      setUnwrap(ch.item, false);
     } else if (ch.kind === 'removed') {
       // Back in the page, and with the words it had in the file.
       var steps = [{ kind: 'restore-block', item: ch.item }];
@@ -2817,6 +3027,22 @@
     refresh();
     flash('Undone — Ctrl/Cmd+Z brings it back');
     return true;
+  }
+
+  // A value with its bold and italic shown as bold and italic.
+  function formattedInto(box, value) {
+    var stack = [box];
+    String(value || '').split(/([\u0001-\u0005])/).forEach(function (piece) {
+      var top = stack[stack.length - 1];
+      if (piece === '\u0001') top.appendChild(doc().createTextNode(' \u21b5 '));
+      else if (piece === '\u0002' || piece === '\u0004') {
+        var el = doc().createElement(piece === '\u0002' ? 'strong' : 'em');
+        el.className = 'c-fmt';
+        top.appendChild(el);
+        stack.push(el);
+      } else if (piece === '\u0003' || piece === '\u0005') { if (stack.length > 1) stack.pop(); }
+      else if (piece) top.appendChild(doc().createTextNode(piece));
+    });
   }
 
   function openChanges() {
@@ -2867,7 +3093,8 @@
       who.textContent = changeHeading(ch);
       var what = doc().createElement('span');
       what.className = 'c-diff';
-      if (ch.kind === 'edit' || ch.kind === 'comment-edit') diffInto(what, ch.before, ch.after);
+      if (ch.kind === 'edit' && ch.formatOnly) formattedInto(what, ch.after);
+      else if (ch.kind === 'edit' || ch.kind === 'comment-edit') diffInto(what, ch.before, ch.after);
       else if (ch.kind === 'comment-del' || ch.kind === 'removed') {
         var d = doc().createElement('del');
         d.textContent = visible(ch.before) || '(it was empty)';
@@ -3063,6 +3290,7 @@
     '.c-row:hover { background: rgba(255, 255, 255, .12); }',
     '.c-list li { position: relative; }',
     '.c-section { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }',
+    '.c-fmt { color: #9fe0b5; }',
     // Notices sit at the top, clear of the list of changes they lead to.
     '.changes.resume { top: 16px; bottom: auto; max-width: min(380px, calc(100vw - 32px)); }',
     '.c-info { border-left-color: #5fb3d9; }',
@@ -3933,10 +4161,15 @@
    * each <br> written as a literal <br>. `replacementFor` also restores the
    * file's line-ending style, which the DOM does not preserve.
    */
+  // Bold and italic the user added are marks in the value, written as tags.
+  var MARK_TAGS = { '\u0001': '<br>', '\u0002': '<strong>', '\u0003': '</strong>',
+                    '\u0004': '<em>', '\u0005': '</em>' };
+
   function serialise(value, span) {
-    return value.split(Islands.BR).map(function (piece) {
-      return Splice.replacementFor(span, piece);
-    }).join('<br>');
+    return normaliseFormat(value).split(/([\u0001-\u0005])/).map(function (piece) {
+      if (MARK_TAGS[piece]) return MARK_TAGS[piece];
+      return piece ? Splice.replacementFor(span, piece) : '';
+    }).join('');
   }
 
   /*
@@ -3991,6 +4224,11 @@
 
     state.removals.forEach(function (x) {
       if (x.active) edits.push({ start: x.cut.start, end: x.cut.end, replacement: '' });
+    });
+    state.unwraps.forEach(function (x) {
+      if (!x.active || !x.element.ownerDocument) return;
+      edits.push({ start: x.open.start, end: x.open.end, replacement: '' });
+      edits.push({ start: x.close.start, end: x.close.end, replacement: '' });
     });
     collectCommentEdits(edits);
     return edits;
@@ -4280,7 +4518,7 @@
         return { region: r, value: commentWanted(r), visible: !!state.commentsVisible };
       }));
     var skipped = emptyAddedCount() + emptyCommentCount();
-    var removedAtSave = state.removals.map(function (x) { return { item: x, active: x.active }; });
+    var removedAtSave = state.removals.concat(state.unwraps).map(function (x) { return { item: x, active: x.active }; });
 
     var toServer = !!(state.served && state.served.canPut) && !opts.as;
     flash(state.saveFile ? 'Saving…' : (toServer ? 'Saving to the server…' : 'Saving…'));
@@ -4432,6 +4670,9 @@
     }
     state.removals.forEach(function (x) {
       if (x.active && !x.saved) edits.push({ k: 'remove', start: x.tags.start, end: x.tags.end, what: x.what, before: x.before });
+    });
+    state.unwraps.forEach(function (x) {
+      if (x.active && !x.saved) edits.push({ k: 'unwrap', start: x.open.start, end: x.close.end, fmt: x.kind, text: x.text, by: x.by });
     });
     for (var j = 0; j < state.comments.length; j++) {
       var c = state.comments[j];
@@ -4656,6 +4897,18 @@
             restored++;
           } else {
             conflicts.push({ kind: 'removed', base: '', theirs: null, mine: e.before || '' });
+          }
+        } else if (e.k === 'unwrap') {
+          var mu = Rebase.mapRange(d, e.start, e.end);
+          var fe = mu && openingAt.get(mu.start);
+          var fr = fe && state.map.elements.get(fe);
+          if (fr && fr.endTag && fr.endTag.end === mu.end) {
+            var un = makeUnwrap(fe, e.fmt);
+            un.by = e.by || un.by;
+            setUnwrap(un, true);
+            restored++;
+          } else {
+            conflicts.push({ kind: 'removed', base: '', theirs: null, mine: e.text || '' });
           }
         } else if (e.k === 'comment-change') {
           var cm = state.comments.find(function (x) { return x.original === e.expected && !used.has(x); });
@@ -5124,6 +5377,7 @@
     revertChange: revertChange,
     sessionSnapshot: sessionSnapshot,
     removeFileBlock: removeFileBlock,
+    toggleFormat: toggleFormat,
     resume: resume,
     conflicts: function () { return state.conflicts.slice(); },
     outsideChanges: function () { return outsideRows().slice(); },
