@@ -275,28 +275,60 @@ origin) before starting it.
 
 ### When the file changes underneath you
 
-Another program (Codex, say, or any other tool that edits files) may change the
-file while you have it open in VibeRevise. To see its changes you reload the
-page, and the page is then the new file. Your session is not lost when you do:
+Another program (Codex, say, or any tool that edits files) may change the file
+while you have it open in VibeRevise.
 
-- Start editing again and VibeRevise asks **Carry on where you left off?**
-- **Carry on** puts your unsaved changes back **where the file is as it was**.
-  A paragraph the other program moved but did not change still gets your
-  edit; so do the paragraphs, lists and comments you added.
-- Anywhere the other program changed text you had also changed is a
-  **clash**. Nothing is written over its words. The list of changes shows
-  both versions, **Theirs** and **Yours**, with **Keep mine** (one undo step),
-  **Keep theirs**, or **Copy mine**.
-- The list of changes also shows what the other program did, under
-  **Changed outside VibeRevise**, word by word, so you can see what it changed
-  without comparing files by hand. Changes you saved before the reload are
-  listed under **Saved before the reload**, with who made them.
-- **Start fresh** forgets the earlier session.
+**VibeRevise notices.** While you are editing, it looks at the file every few
+seconds. When it changes, a notice says so, and how many places changed:
+
+- **Bring the changes in** (in the web app), or **Reload to bring them in**
+  (in the extension, where only a reload can show the new file). Your unsaved
+  edits carry straight over; there is no question to answer.
+- **Later** leaves it until you are ready. It will not nag about the same
+  change again.
+
+It can look when the file was chosen (the card, or the web app), read by the
+extension itself, or served from your own server. In Firefox, or anywhere it
+only has a one-off copy of the file, it cannot, and a reload is how you see
+changes.
+
+**Save will not write over changes it has not seen.** If the file changed since
+VibeRevise last read or saved it, Save stops and offers to bring the changes in
+first. **Save anyway** writes over them, if that is what you want.
+
+**What the other program changed is highlighted in blue** on the page, with a
+bar down the left. Your own edits stay amber, so the two are never confused. A
+red line marks where it removed something. The list of changes has the same
+changes word by word, under **Changed outside VibeRevise**.
+
+**Several rounds of changes do not pile up.** Everything is shown against one
+review point: the file as it was when you last marked the changes reviewed. A
+paragraph the other program changed three times before you looked is one
+entry, from what you reviewed to what is there now.
+
+- **Reviewed**, on each entry, takes it off the list and the page.
+- **Mark all reviewed** clears them all. The next round of changes then shows
+  only what is new.
+- **Hide highlights** (or the blue **outside** button on the bar) takes the
+  highlighting off the page while you edit, without losing the list. Press it
+  again to bring it back.
+- Changes VibeRevise itself saved into the file never count as outside changes.
+
+**Your edits come back where the file is as it was.** A paragraph the other
+program moved but did not change still gets your edit; so do the paragraphs,
+lists and comments you added. Anywhere it changed text you had also changed is
+a **clash**: nothing is written over its words. Both versions are listed,
+**Theirs** and **Yours**, with **Keep mine** (one undo step), **Keep theirs**,
+or **Copy mine**.
+
+The same happens after an ordinary reload: start editing again, and if you had
+unsaved edits VibeRevise asks **Carry on where you left off?** (**Start fresh**
+forgets the earlier session). With nothing of yours at stake it simply carries
+on and shows what changed.
 
 The comparison is line by line. A line the other program did not touch is
-treated as untouched; a line it changed at all is treated as changed. So an
-edit only goes back where the file is exactly as it was, and in a file that
-puts each paragraph on its own line that means paragraph by paragraph.
+treated as untouched; a line it changed at all is treated as changed. In a file
+that puts each paragraph on its own line, that means paragraph by paragraph.
 
 Undo history does not survive a reload, but each change can still be undone
 from its row in the list of changes.
@@ -378,7 +410,7 @@ would throw away every unsaved edit.
 | `scripting` | Inject the editor on demand instead of auto-running on every local file you open. |
 | `downloads` | Chrome cannot write back to a `file://` path, so saving is a download. Used with `saveAs: true` so the OS dialog always opens. |
 | — | **Nothing at all is requested for http or https.** A content script's `fetch` carries the page's origin, so re-reading the document it is running on, and `PUT`ting it back, are ordinary same-origin requests. `activeTab` covers the injection and that is the whole story. |
-| `storage` | The name you type, and whether comments are shown in the document. And, so that a reload does not lose your work, your editing session for the newest eight documents (for two weeks at most): a copy of the file as you opened it, your unsaved changes and the list of changes. All in your browser profile, never sent anywhere. See [When the file changes underneath you](#when-the-file-changes-underneath-you). |
+| `storage` | The name you type, and whether comments are shown in the document. And, so that a reload does not lose your work and changes made by other programs can be shown, your editing session for the newest eight documents you have edited in (for two weeks at most): a copy of the file as you opened it and as you last reviewed it, your unsaved changes and the list of changes. All in your browser profile, never sent anywhere. See [When the file changes underneath you](#when-the-file-changes-underneath-you). |
 | `file:///*` — **optional** | Lets the service worker open the file itself. Not granted at install: the popup asks for it on a button press, Chrome shows its own consent prompt, and declining costs you one click per file instead. |
 | `https://*/*`, `http://*/*` — **optional, AI only** | Lets the background worker reach the AI provider you chose. Nothing is granted at install. The AI settings page asks for **the one host you typed**, at the moment you press Save, and Chrome's prompt names it. Changing the address or forgetting the key takes that permission back. They are listed this broadly only because the address is yours to choose. |
 | `options_ui` | The AI settings page. It is an extension page because only an extension page can ask for host permission, and so you never type your key into a document VibeRevise was injected into. |

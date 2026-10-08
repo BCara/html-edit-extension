@@ -169,8 +169,32 @@
     return set;
   }
 
+  /*
+   * Carry the changes that turned `from` into `to` across to `base`, wherever
+   * the text they changed is still in `base` as it was. Used for the review
+   * point: once VibeRevise has saved its own edits into the file, they must
+   * stop looking like something another tool did.
+   */
+  function transplant(base, from, to) {
+    if (base === from) return to;
+    var ours = diff(from, to);
+    var where = diff(from, base);
+    var cuts = [];
+    ours.hunks.forEach(function (h) {
+      var m = h.aStart === h.aEnd
+        ? (function (p) { return p == null ? null : { start: p, end: p }; })(mapPoint(where, h.aStart))
+        : mapRange(where, h.aStart, h.aEnd);
+      if (m) cuts.push({ start: m.start, end: m.end, text: to.slice(h.bStart, h.bEnd) });
+    });
+    cuts.sort(function (x, y) { return y.start - x.start; });
+    var out = base;
+    cuts.forEach(function (c) { out = out.slice(0, c.start) + c.text + out.slice(c.end); });
+    return out;
+  }
+
   var api = {
     diff: diff,
+    transplant: transplant,
     mapRange: mapRange,
     mapPoint: mapPoint,
     hunkAt: hunkAt,

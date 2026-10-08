@@ -64,6 +64,19 @@ section('the edges');
   eq(R.diff('', 'x').hunks.length, 1, 'from nothing');
 }
 
+section('carrying our own saved edits onto the review point');
+{
+  // base: what was last reviewed. from -> to: our save. The other tool's
+  // change (in base's future) is not involved.
+  const from = A;
+  const to = A.replace('Third paragraph, also untouched.', 'Third paragraph, edited by us.');
+  eq(R.transplant(from, from, to), to, 'with nothing outstanding, the review point is simply what was saved');
+  const base = A.replace('First paragraph, untouched.', 'First paragraph, as reviewed earlier.');
+  const moved = R.transplant(base, from, to);
+  ok(moved.indexOf('edited by us') !== -1, 'our edit is carried across');
+  ok(moved.indexOf('as reviewed earlier') !== -1, 'and the rest of the review point is left alone');
+}
+
 section('readable text, and likeness');
 {
   eq(R.textOf('<p class="x">Smith&nbsp;&amp;&nbsp;Sons <b>rose</b> 5&#37;</p><!-- note -->'), 'Smith & Sons rose 5%',

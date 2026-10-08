@@ -155,7 +155,16 @@
     sessionRead: false,   // the kept session has been read: only then may it be replaced
     written: null,        // the text last saved from this page, if any
     conflicts: [],        // edits that could not go back on, because the file changed there
-    outside: [],          // what changed in the file outside VibeRevise
+    // The review point: the file as it was when the user last marked outside
+    // changes as reviewed, in the same terms as `source`. What differs between
+    // the two is what changed outside VibeRevise and has not been looked at.
+    reviewBase: null,
+    showOutside: true,    // highlight those changes on the page
+    outsideCache: null,
+    watch: null,          // host: { read(), bringIn(), bringInLabel }, to notice the file changing
+    watchTimer: 0,
+    diskText: null,       // the file as last seen on disk, when it differs from ours
+    diskDismissed: null,  // a change the user said "later" to
     earlier: [],          // changes saved before the last reload, as rows to show
     removals: [],         // emptied blocks from the file, taken out with Delete
   }; }
@@ -185,6 +194,15 @@
     '  outline: none !important;',
     '  background: rgba(91, 82, 240, .12) !important;',
     '  box-shadow: 0 0 0 2px rgba(91, 82, 240, .75) !important;',
+    '}',
+    // Changed outside VibeRevise, since the user last reviewed: blue, so it is
+    // never mistaken for their own (amber) edits.
+    ':root[data-vr-mode] [data-vr-outside] {',
+    '  background: rgba(95, 179, 217, .16) !important;',
+    '  box-shadow: -4px 0 0 rgba(95, 179, 217, .9) !important;',
+    '}',
+    ':root[data-vr-mode] [data-vr-outside-gone] {',
+    '  box-shadow: 0 -3px 0 rgba(255, 120, 120, .85) !important;',
     '}',
     ':root[data-vr-mode] [data-vr-island][data-vr-changed] {',
     '  background: rgba(217, 160, 30, .16) !important;',
@@ -243,7 +261,10 @@
     // the edits are still there and still unsaved.
     '.bar.paused .dot { background: #d9a01e; }',
     '.bar.paused .insert, .bar.paused .menu, .bar.paused .undo, .bar.paused .redo,',
-    '.bar.paused .more-btn, .bar.paused .panel, .bar.paused .ai-btn, .bar.paused .sep { display: none; }',
+    '.bar.paused .more-btn, .bar.paused .panel, .bar.paused .ai-btn, .bar.paused .sep,',
+    '.bar.paused .outside-btn { display: none; }',
+    '.outside-btn { color: #9fd6ef; }',
+    '.outside-btn[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }',
     '.sep { width: 1px; align-self: stretch; margin: 2px 1px; background: rgba(255, 255, 255, .16); flex: none; }',
     // The count reads as text but opens the list of changes.
     'button.count { background: transparent; padding: 4px 6px; color: #a5aab8; }',
@@ -2346,6 +2367,8 @@
           '<button class="p-changes p-saveas" title="Ctrl/Cmd+Shift+S">Save as\u2026</button>' +
         '</div>' +
         (state.ai ? AI_MARKUP : '') +
+        '<button class="outside-btn" hidden aria-pressed="true" ' +
+          'title="Show or hide what changed outside VibeRevise"></button>' +
         '<button class="save primary" disabled>Save</button>' +
         '<button class="pause" title="Stop editing for now, so you can select and copy text">Pause</button>' +
         '<button class="done">Done</button>' +
@@ -2372,6 +2395,7 @@
       authorSave: shadow.querySelector('.p-save'),
       changesBtn: shadow.querySelector('.p-changes'),
       saveAsBtn: shadow.querySelector('.p-saveas'),
+      outsideBtn: shadow.querySelector('.outside-btn'),
       info: shadow.querySelector('.p-info'),
       infoRows: shadow.querySelectorAll('[data-info]'),
       showComments: shadow.querySelector('.p-show-comments'),
@@ -2411,6 +2435,10 @@
     ui.redo.addEventListener('mousedown', function (e) { e.preventDefault(); redo(); });
     ui.save.addEventListener('click', function () { save(); });
     ui.saveAsBtn.addEventListener('click', function () { setMoreOpen(false); saveAs(); });
+    ui.outsideBtn.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      setShowOutside(!state.showOutside);
+    });
     ui.done.addEventListener('click', function () { setActive(false); });
     ui.pause.addEventListener('click', function () { setPaused(!state.paused); });
 
@@ -2489,6 +2517,10 @@
     if (state.conflicts.length) {
       text += ' · ' + state.conflicts.length + (state.conflicts.length === 1 ? ' clash' : ' clashes');
     }
+    var outsideN = outsideRows().length;
+    state.ui.outsideBtn.hidden = !outsideN;
+    state.ui.outsideBtn.textContent = '\u25d1 ' + outsideN + ' outside';
+    state.ui.outsideBtn.setAttribute('aria-pressed', state.showOutside ? 'true' : 'false');
     state.ui.count.textContent = text;
     state.ui.save.disabled = unsaved === 0;
     scheduleSession();
@@ -2809,7 +2841,7 @@
     head.className = 'c-head';
     var title = doc().createElement('strong');
     title.textContent = list.length ? 'Changes (' + list.length + ')'
-      : (state.conflicts.length || state.outside.length || state.earlier.length) ? 'Changes' : 'No changes yet';
+      : (state.conflicts.length || outsideRows().length || state.earlier.length) ? 'Changes' : 'No changes yet';
     var close = doc().createElement('button');
     close.className = 'x';
     close.title = 'Close';
@@ -2869,13 +2901,35 @@
         'You changed these, and so did something outside VibeRevise. Keep one or the other.'));
       state.conflicts.forEach(function (x) { box.appendChild(conflictRow(x)); });
     }
-    if (state.outside.length) {
-      box.appendChild(sectionHead('Changed outside VibeRevise (' + state.outside.length + ')',
-        'Already in the file. Shown so you can see what the other tool did.'));
+    var outside = outsideRows();
+    if (outside.length) {
+      box.appendChild(sectionHead('Changed outside VibeRevise (' + outside.length + ')',
+        'Since you last marked them reviewed. Already in the file; highlighted in blue on the page.'));
+      var otools = doc().createElement('div');
+      otools.className = 'r-tools';
+      var showBtn = doc().createElement('button');
+      showBtn.className = 'pill';
+      showBtn.textContent = state.showOutside ? 'Hide highlights' : 'Show highlights';
+      showBtn.addEventListener('click', function () { setShowOutside(!state.showOutside); });
+      var allBtn = doc().createElement('button');
+      allBtn.className = 'pill';
+      allBtn.textContent = 'Mark all reviewed';
+      allBtn.addEventListener('click', function () { markReviewed(null); });
+      otools.appendChild(showBtn);
+      otools.appendChild(allBtn);
+      box.appendChild(otools);
       var ol2 = doc().createElement('ol');
       ol2.className = 'c-list';
-      state.outside.forEach(function (o) {
-        ol2.appendChild(infoRow('Changed outside VibeRevise · ' + shortTime(o.at), o.before, o.after, o.target));
+      outside.forEach(function (o) {
+        var li = infoRow(o.after ? (o.before ? 'Changed outside VibeRevise' : 'Added outside VibeRevise')
+          : 'Removed outside VibeRevise', o.before, o.after, o.target);
+        var done = doc().createElement('button');
+        done.className = 'c-undo';
+        done.textContent = 'Reviewed';
+        done.title = 'Stop highlighting this one';
+        done.addEventListener('click', function () { markReviewed(o); });
+        li.appendChild(done);
+        ol2.appendChild(li);
       });
       box.appendChild(ol2);
     }
@@ -3009,6 +3063,8 @@
     '.c-row:hover { background: rgba(255, 255, 255, .12); }',
     '.c-list li { position: relative; }',
     '.c-section { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }',
+    // Notices sit at the top, clear of the list of changes they lead to.
+    '.changes.resume { top: 16px; bottom: auto; max-width: min(380px, calc(100vw - 32px)); }',
     '.c-info { border-left-color: #5fb3d9; }',
     '.changes .s-item b { font-weight: 600; color: #c6cbd6; }',
     '.c-who { font-weight: 600; font-size: 12px; padding-right: 52px; }',
@@ -4182,7 +4238,26 @@
   // download), it is a download, whose dialog always asks where.
   function saveAs() { return save({ as: true }); }
 
+  /*
+   * Saving over a file another tool has changed since would throw its work
+   * away without anyone seeing it. When Save writes in place and the host can
+   * look, it looks first, and offers to bring the changes in instead.
+   */
   function save(opts) {
+    opts = opts || {};
+    var inPlace = state.saveFile || (state.served && state.served.canPut);
+    if (opts.force || opts.as || !state.watch || !inPlace || !state.regions.length) return saveNow(opts);
+    return Promise.resolve(state.watch.read()).catch(function () { return null; }).then(function (text) {
+      if (text != null && text !== expectedOnDisk()) {
+        state.diskText = text;
+        showDiskNotice(true);
+        return;
+      }
+      return saveNow(opts);
+    });
+  }
+
+  function saveNow(opts) {
     opts = opts || {};
     if (!state.regions.length) { flash('Nothing to save'); return Promise.resolve(); }
 
@@ -4234,7 +4309,9 @@
           : 'Save failed: ' + ((res && res.message) || 'unknown error'));
         return;
       }
-      state.written = text;
+      // What the file on disk now holds, when the save wrote over it. A
+      // download leaves the file as it was.
+      if (res.inPlace || res.toServer) state.written = text;
       state.earlierThisLoad = collectChanges().map(rowRecord);
       removedAtSave.forEach(function (x) { x.item.saved = x.active; });
       for (var i = 0; i < snapshot.length; i++) {
@@ -4295,12 +4372,13 @@
     state.sessionTimer = setTimeout(saveSessionNow, 700);
   }
 
-  function saveSessionNow() {
+  // Kept from the moment a document is opened, edits or not: without the
+  // file as it was, a change another tool makes cannot be shown afterwards.
+  function saveSessionNow(extra) {
     if (!state.session || !state.sessionRead || state.resumePending || state.restoring || !state.regions.length) return;
     clearTimeout(state.sessionTimer);
-    var snap = sessionSnapshot();
-    var empty = !snap.edits.length && !snap.conflicts.length && !snap.outside.length && !snap.earlier.length;
-    var done = empty ? state.session.clear() : state.session.save(snap);
+    var snap = Object.assign(sessionSnapshot(), extra || {});
+    var done = state.session.save(snap);
     Promise.resolve(done).catch(function (err) {
       if (state.sessionWarned) return;
       state.sessionWarned = true;
@@ -4376,7 +4454,8 @@
       conflicts: state.conflicts.map(function (x) {
         return { kind: x.kind, base: x.base, theirs: x.theirs, mine: x.mine, by: x.by, ai: x.ai, model: x.model };
       }),
-      outside: state.outside.map(function (o) { return { before: o.before, after: o.after, at: o.at }; }),
+      reviewBase: state.reviewBase,
+      showOutside: state.showOutside,
       earlier: state.earlier.concat(state.earlierThisLoad || []),
     };
   }
@@ -4392,7 +4471,9 @@
     var reference = prior.written != null ? prior.written : prior.baseline;
     var changed = reference !== state.source;
     var pending = prior.edits.length + (prior.conflicts || []).length;
-    if (!pending && !changed) { resume(true); return; }
+    // Nothing of the user's at stake, or a reload VibeRevise asked for: carry
+    // on without a question. What changed is still shown.
+    if (!pending || prior.autoResume) { resume(true); return; }
 
     state.resumePending = true;
     var box = ensureAssist().resume;
@@ -4443,7 +4524,7 @@
     var bits = [];
     if (result.restored) bits.push(result.restored + ' change' + (result.restored === 1 ? '' : 's') + ' put back');
     if (state.conflicts.length) bits.push(state.conflicts.length + ' clash' + (state.conflicts.length === 1 ? '' : 'es') + ' to settle');
-    if (result.outside) bits.push(result.outside + ' change' + (result.outside === 1 ? '' : 's') + ' made outside VibeRevise');
+    if (result.outside) bits.push(result.outside + ' change' + (result.outside === 1 ? '' : 's') + ' made outside VibeRevise, in blue');
     if (bits.length) {
       flash(bits.join(' · '));
       if (state.conflicts.length || result.outside) openChanges();
@@ -4467,8 +4548,6 @@
   function restoreSession(prior) {
     var Rebase = root.VibeReviseRebase;
     var d = Rebase.diff(prior.baseline, state.source);
-    var reference = prior.written != null ? prior.written : prior.baseline;
-    var dOut = reference === prior.baseline ? d : Rebase.diff(reference, state.source);
 
     var texts = state.regions.filter(function (r) { return r.kind === 'text'; });
     var byStart = new Map(texts.map(function (r) { return [r.record.span.start, r]; }));
@@ -4594,26 +4673,25 @@
       state.restoring = false;
     }
 
-    // What the other tool did, for the list of changes.
-    var now = Date.now();
-    var outside = [];
-    dOut.hunks.forEach(function (h) {
-      var before = Rebase.textOf(reference.slice(h.aStart, h.aEnd));
-      var after = Rebase.textOf(state.source.slice(h.bStart, h.bEnd));
-      if (before === after) return;
-      var t = texts.find(function (r) { return r.record.span.start >= h.bStart && r.record.span.start < h.bEnd; });
-      outside.push({ before: before, after: after, at: now,
-        target: t ? (Blocks.blockFor(t.island) || t.island) : null });
-    });
+    // The review point, carried forward. What VibeRevise itself saved into
+    // the file is moved onto it, so only the other tool's changes show.
+    var review = prior.reviewBase != null ? prior.reviewBase : prior.baseline;
+    if (prior.written != null) review = Rebase.transplant(review, prior.baseline, prior.written);
+    state.reviewBase = review;
+    state.outsideCache = null;
+    var fresh = outsideRows().length;
+    // Something new from outside is shown; otherwise as the user left it.
+    var reference = prior.written != null ? prior.written : prior.baseline;
+    state.showOutside = reference !== state.source || prior.showOutside !== false;
 
     state.history = [];
     state.historyAt = 0;
     state.conflicts = conflicts;
-    state.outside = (prior.outside || []).concat(outside);
     state.earlier = prior.earlier || [];
     renderRail();
     positionCards();
-    return { restored: restored, conflicts: conflicts.length, outside: outside.length };
+    renderOutsideMarks();
+    return { restored: restored, conflicts: conflicts.length, outside: fresh };
   }
 
   /*
@@ -4638,6 +4716,186 @@
     return true;
   }
 
+
+  // --- what changed outside VibeRevise ----------------------------------------
+
+  /*
+   * One row per changed stretch of the file since the review point, however
+   * many times another tool went over it: a paragraph changed three times
+   * before anyone looked is one row, from what was reviewed to what is there
+   * now. That is what keeps several rounds of changes from piling up.
+   */
+  function outsideRows() {
+    if (!state.reviewBase || state.reviewBase === state.source || !state.map) return [];
+    var c = state.outsideCache;
+    if (c && c.base === state.reviewBase && c.source === state.source) return c.rows;
+    var Rebase = root.VibeReviseRebase;
+    var d = Rebase.diff(state.reviewBase, state.source);
+    var texts = state.regions.filter(function (r) { return r.kind === 'text'; });
+    var rows = [];
+    d.hunks.forEach(function (h) {
+      var before = Rebase.textOf(state.reviewBase.slice(h.aStart, h.aEnd));
+      var after = Rebase.textOf(state.source.slice(h.bStart, h.bEnd));
+      if (before === after) return;
+      var blocks = [];
+      texts.forEach(function (r) {
+        if (r.record.span.start >= h.bStart && r.record.span.end <= h.bEnd) {
+          var b = Blocks.blockFor(r.island) || r.island;
+          if (blocks.indexOf(b) === -1) blocks.push(b);
+        }
+      });
+      var next = null;
+      if (!blocks.length) {
+        var t = texts.find(function (r) { return r.record.span.start >= h.bEnd; });
+        next = t ? (Blocks.blockFor(t.island) || t.island) : null;
+      }
+      rows.push({ hunk: h, before: before, after: after, blocks: blocks, gone: next,
+                  target: blocks[0] || next });
+    });
+    state.outsideCache = { base: state.reviewBase, source: state.source, rows: rows };
+    return rows;
+  }
+
+  function clearOutsideMarks() {
+    var marked = doc().querySelectorAll('[data-vr-outside],[data-vr-outside-gone]');
+    for (var i = 0; i < marked.length; i++) {
+      marked[i].removeAttribute('data-vr-outside');
+      marked[i].removeAttribute('data-vr-outside-gone');
+    }
+  }
+
+  function renderOutsideMarks() {
+    clearOutsideMarks();
+    if (!state.active || state.paused || !state.showOutside) return;
+    outsideRows().forEach(function (o) {
+      o.blocks.forEach(function (b) { if (b.isConnected) b.setAttribute('data-vr-outside', ''); });
+      if (o.gone && o.gone.isConnected) o.gone.setAttribute('data-vr-outside-gone', '');
+    });
+  }
+
+  function setShowOutside(on) {
+    state.showOutside = !!on;
+    renderOutsideMarks();
+    refresh();
+    renderChanges();
+    flash(on ? 'Showing what changed outside VibeRevise, in blue' : 'Highlights hidden — the changes are still listed');
+  }
+
+  /*
+   * Reviewed: one row, or all of them. The review point takes that stretch
+   * as it is now, so it stops being highlighted and drops off the list; the
+   * next change another tool makes there shows up afresh.
+   */
+  function markReviewed(row) {
+    var rows = outsideRows();
+    if (!rows.length) return 0;
+    if (!row) {
+      state.reviewBase = state.source;
+    } else {
+      var h = row.hunk;
+      state.reviewBase = state.reviewBase.slice(0, h.aStart) + state.source.slice(h.bStart, h.bEnd) +
+        state.reviewBase.slice(h.aEnd);
+    }
+    state.outsideCache = null;
+    renderOutsideMarks();
+    refresh();
+    renderChanges();
+    return row ? 1 : rows.length;
+  }
+
+  // --- noticing the file change while it is open ------------------------------
+
+  /*
+   * Every few seconds while editing, ask the host what the file now holds,
+   * and compare it with what VibeRevise thinks is there: the text this page
+   * opened, or the text it last saved over it. Only while the page is in view.
+   */
+  var WATCH_MS = 4000;
+
+  function expectedOnDisk() { return state.written != null ? state.written : state.source; }
+
+  function startWatching() {
+    stopWatching();
+    if (!state.watch) return;
+    state.watchTimer = setInterval(function () {
+      if (!state.active || doc().hidden || state.resumePending) return;
+      checkDisk();
+    }, WATCH_MS);
+  }
+  function stopWatching() { clearInterval(state.watchTimer); state.watchTimer = 0; }
+
+  function checkDisk() {
+    if (!state.watch) return Promise.resolve(false);
+    return Promise.resolve(state.watch.read()).then(function (text) {
+      if (text == null || text === expectedOnDisk()) { state.diskText = null; return false; }
+      state.diskText = text;
+      if (text !== state.diskDismissed) showDiskNotice(false);
+      return true;
+    }).catch(function () { return false; });
+  }
+
+  function diskPlaces() {
+    if (state.diskText == null) return 0;
+    var Rebase = root.VibeReviseRebase;
+    return Rebase.diff(expectedOnDisk(), state.diskText).hunks.length;
+  }
+
+  // The bar that says so. Also what Save shows when it would overwrite it.
+  function showDiskNotice(saving) {
+    var box = ensureAssist().resume;
+    box.textContent = '';
+    var title = doc().createElement('strong');
+    title.textContent = saving ? 'The file was changed outside VibeRevise' : 'This file was changed outside VibeRevise';
+    box.appendChild(title);
+    var n = diskPlaces();
+    var p = doc().createElement('div');
+    p.className = 'c-note';
+    p.textContent = (n ? 'In ' + n + ' place' + (n === 1 ? '' : 's') + '. ' : '') + (saving
+      ? 'Saving now would write over those changes. Bring them in first and your edits carry over; anything you both changed shows as a clash.'
+      : 'Bring the changes in to see them, highlighted in blue. Your unsaved edits carry over.');
+    box.appendChild(p);
+    var tools = doc().createElement('div');
+    tools.className = 'r-tools';
+    var go = doc().createElement('button');
+    go.className = 'pill primary';
+    go.textContent = (state.watch && state.watch.bringInLabel) || 'Bring the changes in';
+    go.addEventListener('click', bringIn);
+    tools.appendChild(go);
+    if (saving) {
+      var anyway = doc().createElement('button');
+      anyway.className = 'pill';
+      anyway.textContent = 'Save anyway';
+      anyway.title = 'Write over the other changes';
+      anyway.addEventListener('click', function () { box.hidden = true; save({ force: true }); });
+      tools.appendChild(anyway);
+    }
+    var later = doc().createElement('button');
+    later.className = 'pill';
+    later.textContent = saving ? 'Cancel' : 'Later';
+    later.addEventListener('click', function () { box.hidden = true; state.diskDismissed = state.diskText; });
+    tools.appendChild(later);
+    box.appendChild(tools);
+    box.hidden = false;
+  }
+
+  /*
+   * Bring the file's new contents in: the session is kept as it stands, marked
+   * to carry straight on, and the host shows the file again (the web app in
+   * place; the extension by reloading the page). The usual comparison does
+   * the rest: edits go back where the file is unchanged, clashes are listed,
+   * and the other tool's changes are highlighted.
+   */
+  function bringIn() {
+    if (!state.watch) return false;
+    if (state.assist) state.assist.resume.hidden = true;
+    flushCommentEdit();
+    saveSessionNow({ autoResume: true });
+    Promise.resolve(state.watch.bringIn()).catch(function (err) {
+      flash('Could not bring the changes in: ' + (err && err.message || err));
+    });
+    return true;
+  }
+
   // --- lifecycle -------------------------------------------------------------
 
   function setActive(next) {
@@ -4657,11 +4915,17 @@
       addListeners();
       ensureStatusBar();
       renderRail();
+      if (state.reviewBase == null) state.reviewBase = state.source;
       refresh();
+      renderOutsideMarks();
+      startWatching();
+      saveSessionNow();
       if (!state.regions.length) flash('No editable text found in this file');
     } else {
       setPaused(false);
       state.active = false;
+      stopWatching();
+      clearOutsideMarks();
       // Suggestions belong to the paragraphs on screen in this session of
       // editing; anything still on its way back is no longer wanted.
       if (state.aiJob) state.aiJob.cancelled = true;
@@ -4720,6 +4984,7 @@
       closeRail();
       removeAssist();
       removeListeners();
+      clearOutsideMarks();
       PAUSED_LISTENERS.forEach(function (l) { doc().addEventListener(l[0], l[1], l[2]); });
       doc().documentElement.removeAttribute(MODE_ATTR);
       var active = doc().activeElement;
@@ -4730,6 +4995,7 @@
         doc().documentElement.setAttribute(MODE_ATTR, 'on');
         addListeners();
         renderRail();
+        renderOutsideMarks();
       }
     }
 
@@ -4755,6 +5021,7 @@
       state = makeState();
     }
     state.doc = options.doc || null;
+    state.watch = options.watch || null;
     // Where this document's session is kept between reloads, if the host keeps one.
     state.session = options.session || null;
     state.prior = null;
@@ -4769,6 +5036,9 @@
           Promise.resolve(state.session.clear()).catch(function () {});
         }
         state.sessionRead = true;
+        // Nothing kept: keep the file as it is now, so a change another tool
+        // makes before the next reload can be shown.
+        if (!state.prior && state.active) saveSessionNow();
       }).catch(function () { state.sessionRead = true; /* nothing kept is fine */ });
     }
     state.settings = options.settings || null;
@@ -4856,7 +5126,11 @@
     removeFileBlock: removeFileBlock,
     resume: resume,
     conflicts: function () { return state.conflicts.slice(); },
-    outsideChanges: function () { return state.outside.slice(); },
+    outsideChanges: function () { return outsideRows().slice(); },
+    markReviewed: markReviewed,
+    setShowOutside: setShowOutside,
+    checkDisk: checkDisk,
+    bringIn: bringIn,
     settleConflict: settleConflict,
     changeHeading: changeHeading,
     atEndOfBlock: atEndOfBlock,

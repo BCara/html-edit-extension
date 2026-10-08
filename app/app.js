@@ -146,6 +146,34 @@ function sessionFor(name) {
   };
 }
 
+/*
+ * What the open file holds now, so the editor can notice another program
+ * changing it. Through the handle when there is one, or the address it was
+ * fetched from; null when it cannot be told. Bringing the changes in is a
+ * fresh load of the new text, with the kept session carrying the edits over.
+ */
+function watchFor() {
+  var url = current.url || null;
+  return {
+    read: function () {
+      if (current.handle) {
+        return current.handle.getFile().then(function (f) { return f.text(); }).catch(function () { return null; });
+      }
+      if (url) {
+        return fetch(url, { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : null; })
+          .catch(function () { return null; });
+      }
+      return Promise.resolve(null);
+    },
+    bringIn: function () {
+      return this.read().then(function (text) {
+        if (text != null) return load(text, current.name, current.handle, current.url);
+      });
+    },
+    bringInLabel: 'Bring the changes in',
+  };
+}
+
 // Handed to the editor as options.ai.
 var AI_HOST = {
   status: function () {
@@ -282,13 +310,15 @@ function render(source) {
   });
 }
 
-async function load(source, name, handle) {
+// `url`: where a fetched document came from, so it can be read again.
+async function load(source, name, handle, url) {
   var problem = encodingProblem(source);
   if (problem) { toast(problem, 'warn'); return; }
 
   current.source = source;
   current.name = name || 'document.html';
   current.handle = handle;
+  current.url = url || null;
 
   var d = await render(source);
   var map = window.VibeReviseMap.build(source, d);
@@ -315,6 +345,7 @@ async function load(source, name, handle) {
     settings: SETTINGS,
     ai: AI ? AI_HOST : null,
     session: sessionFor(current.name),
+    watch: watchFor(),
     fresh: true,
   });
   window.VibeReviseEditor.setActive(true);
@@ -336,7 +367,7 @@ async function writeThroughHandle(text) {
   var writable = await current.handle.createWritable();
   await writable.write(new Blob([text], { type: 'text/html;charset=utf-8' }));
   await writable.close();
-  return { ok: true, where: 'Saved to ' + current.name };
+  return { ok: true, inPlace: true, where: 'Saved to ' + current.name };
 }
 
 function fileFor(text) {
@@ -513,8 +544,9 @@ function openNetwork(url) {
   if (problem) { netMessage(problem, 'warn'); return; }
 
   netMessage('Fetching…');
+  var from = null;
   resolveSrc(url)
-    .then(function (resolved) { return fetch(resolved, { credentials: 'same-origin' }); })
+    .then(function (resolved) { from = resolved; return fetch(resolved, { credentials: 'same-origin' }); })
     .then(function (r) {
       if (!r.ok) throw new Error('the server answered ' + r.status);
       return r.text();
@@ -524,7 +556,7 @@ function openNetwork(url) {
       rememberRecent(url);
       netMessage('');
       // No file handle behind a fetched document, so Save shares or downloads.
-      return load(text, name, null);
+      return load(text, name, null, from);
     })
     .catch(function (err) {
       netMessage('Could not open it — ' + err.message, 'warn');
@@ -627,8 +659,9 @@ function resolveSrc(src) {
 function openFromQuery() {
   var src = new URLSearchParams(location.search).get('src');
   if (!src) return;
+  var from = null;
   resolveSrc(src)
-    .then(function (url) { return fetch(url, { credentials: 'same-origin' }); })
+    .then(function (url) { from = url; return fetch(url, { credentials: 'same-origin' }); })
     .then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.text();
@@ -636,7 +669,7 @@ function openFromQuery() {
     .then(function (text) {
       // From the document's own URL, never the proxy wrapper around it.
       var name = decodeURIComponent(src.split('/').pop().split('?')[0]) || 'document.html';
-      return load(text, name, null);
+      return load(text, name, null, from);
     })
     .catch(function (err) {
       toast('Could not open ' + src + ' — ' + err.message, 'warn');

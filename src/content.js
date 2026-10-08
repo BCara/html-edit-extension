@@ -24,7 +24,7 @@
    * symptom is a TypeError on whichever global is missing. Check up front and
    * say what actually needs doing.
    */
-  var VERSION = '0.15.2';
+  var VERSION = '0.16.0';
   var REQUIRED = [
     'VibeReviseTokenizer', 'VibeReviseMap', 'VibeReviseSplice',
     'VibeReviseIslands', 'VibeReviseBlocks', 'VibeReviseStructures',
@@ -142,6 +142,40 @@
         return chrome.storage.local.set({ sessions: (got.sessions || []).filter(function (s) { return s.key !== key; }) });
       });
     },
+  };
+
+  /*
+   * What the file holds now, for noticing that another program has changed
+   * it. Through the handle when there is one (cheap: the text is only read
+   * again when the file's modified time moves), else the way it was read.
+   * Null when it cannot be told, which the editor takes as "no news".
+   */
+  var lastLook = { modified: null, size: null, text: null };
+  var WATCH = {
+    read: function () {
+      if (state.handle) {
+        return state.handle.getFile().then(function (file) {
+          if (file.lastModified === lastLook.modified && file.size === lastLook.size && lastLook.text != null) {
+            return lastLook.text;
+          }
+          return file.text().then(function (text) {
+            lastLook = { modified: file.lastModified, size: file.size, text: text };
+            return text;
+          });
+        }).catch(function () { return null; });
+      }
+      if (isServed()) {
+        return fetch(location.href, { cache: 'no-store', credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.text() : null; })
+          .catch(function () { return null; });
+      }
+      return send({ type: 'vibeRevise:readFile', url: location.href })
+        .then(function (res) { return res && res.ok ? res.text : null; });
+    },
+    // The page has to show the new file, and only a reload does that here.
+    // The session is already kept, marked to carry straight on.
+    bringIn: function () { location.reload(); },
+    bringInLabel: 'Reload to bring them in',
   };
 
   /*
@@ -395,7 +429,7 @@
           return { ok: false, message: 'Save cancelled' };
         }
         return Prompt.writeThrough(handle, text).then(function () {
-          return { ok: true, where: 'Saved over ' + filename() };
+          return { ok: true, inPlace: true, where: 'Saved over ' + filename() };
         });
       }).catch(function (err) {
         // Losing the handle mid-session — the file moved, the permission
@@ -536,6 +570,7 @@
           settings: SETTINGS,
           ai: AI_HOST,
           session: SESSION,
+          watch: WATCH,
           // Non-null whenever this browser can write a file at all: Save then
           // writes over the top of the file rather than downloading a copy,
           // asking once for somewhere to write if it does not already know.

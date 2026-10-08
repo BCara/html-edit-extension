@@ -18,12 +18,17 @@ the AI service you chose, and only when you ask.
   the comments you add to documents you save. It is self-declared, not a
   sign-in.
 - **Whether comments are shown in the document.** A single on-or-off setting.
-- **Your editing session, so a reload does not lose it.** While you edit a
-  document, VibeRevise keeps a copy of it as you opened it, your unsaved
-  changes and the list of changes in this browser's storage, under the
-  document's address. That is what lets it put your work back after a reload,
-  even when another program changed the file meanwhile. It is never sent
-  anywhere. The newest eight are kept, for two weeks at most, and **Start
+- **Your editing session, so a reload does not lose it.** From the moment you
+  start editing a document, VibeRevise keeps a copy of it as you opened it (and
+  as you last reviewed it), your unsaved changes and the list of changes in
+  this browser's storage, under the document's address. That is what lets it
+  put your work back after a reload, and show what another program changed in
+  the file meanwhile. It is never sent anywhere.
+- **The file, looked at again while you edit.** To notice another program
+  changing it, VibeRevise reads the file again every few seconds while you are
+  editing it and the page is in view. It reads it the way it first did, from
+  your own disk or your own server, and compares it in your browser. Nothing
+  is sent anywhere. The newest eight are kept, for two weeks at most, and **Start
   fresh** forgets one straight away.
 - **Your AI settings**, if you add them: the provider, its address, the model
   and your API key. They are kept in this browser only and are not synced. In

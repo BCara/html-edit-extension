@@ -80,11 +80,11 @@ function memoryStore() {
   };
 }
 
-function open(source, store, saveFile) {
+function open(source, store, saveFile, watch) {
   render(source);
   const map = VibeReviseMap.build(source, D);
   E.init({ fresh: true, trustSynthetic: true, doc: D, source, map, filename: 'plan.html', session: store,
-           saveFile: saveFile || null });
+           saveFile: saveFile || null, watch: watch || null });
   E.setActive(true);
 }
 
@@ -108,12 +108,98 @@ function type(isl, text) {
 }
 
 async function run() {
-  heading('nothing kept: nothing asked');
+  heading('opened, not edited, changed by another tool: the changes are still shown');
   {
     const store = memoryStore();
     open(V1, store);
     await settle();
-    eq(store.peek(), null, 'opening a file and not editing it keeps nothing');
+    ok(store.peek() && store.peek().baseline === V1, 'the file as opened is kept from the start, edits or not');
+    open(V2, store);                                     // Codex changed it; reloaded
+    await settle();
+    const rows = E.outsideChanges();
+    eq(rows.length, 2, 'both of the other tool\u2019s changes are listed, with no question asked');
+    ok(D.getElementById('b').hasAttribute('data-vr-outside'), 'the rewritten paragraph is highlighted on the page');
+    ok(D.getElementById('new').hasAttribute('data-vr-outside'), 'and so is the one it added');
+    ok(!D.getElementById('c').hasAttribute('data-vr-outside'), 'and nothing it left alone');
+  }
+
+  heading('several rounds of changes: one entry per paragraph, since the last review');
+  {
+    const store = memoryStore();
+    open(V1, store);
+    await settle();
+    open(V2, store);                                     // round one
+    await settle();
+    const V3 = V2.replace('dropped sharply; onboarding is now fully staffed.', 'fell by a third; onboarding is complete.');
+    open(V3, store);                                     // round two, over the same paragraph
+    await settle();
+    const rows = E.outsideChanges();
+    eq(rows.length, 2, 'still two entries, not three');
+    const b = rows.find((r) => /complete/.test(r.after));
+    ok(b && /turnover fell, and onboarding is fully staffed/.test(b.before),
+       'the twice-changed paragraph runs from what was reviewed to what is there now');
+
+    E.setShowOutside(false);
+    ok(!D.querySelector('[data-vr-outside]'), 'hiding takes the highlights off the page');
+    eq(E.outsideChanges().length, 2, 'without losing the list');
+    E.setShowOutside(true);
+    ok(D.querySelector('[data-vr-outside]'), 'and showing puts them back');
+
+    eq(E.markReviewed(b), 1, 'one entry can be marked reviewed');
+    eq(E.outsideChanges().length, 1, 'and drops off the list');
+    ok(!D.getElementById('b').hasAttribute('data-vr-outside'), 'and its highlight goes');
+    await new Promise((r) => setTimeout(r, 800));
+    const V4 = V3.replace('Costs held steady across every region.', 'Costs rose in the north.');
+    open(V4, store);                                     // round three
+    await settle();
+    const after = E.outsideChanges();
+    ok(after.length === 2 && after.some((r) => /rose in the north/.test(r.after)) &&
+       !after.some((r) => /complete/.test(r.after)), 'the next round shows only what is new, plus what was not yet reviewed');
+    E.markReviewed(null);
+    eq(E.outsideChanges().length, 0, 'mark all reviewed clears the list');
+    ok(!D.querySelector('[data-vr-outside]'), 'and the page');
+  }
+
+  heading('noticing a change while the page is open');
+  {
+    const store = memoryStore();
+    let onDisk = V1, brought = 0;
+    const watch = { read: () => Promise.resolve(onDisk), bringIn: () => { brought++; }, bringInLabel: 'Bring the changes in' };
+    open(V1, store, null, watch);
+    await settle();
+    eq(await E.checkDisk(), false, 'nothing to say while the file is as it was');
+    onDisk = V2;
+    eq(await E.checkDisk(), true, 'a change on disk is noticed');
+    type(island('#a'), ' Mine.');
+    ok(E.bringIn(), 'bringing it in');
+    await settle();
+    eq(brought, 1, 'asks the host to show the new file');
+    ok(store.peek().autoResume === true && store.peek().edits.length === 1,
+       'with the session kept and marked to carry straight on');
+
+    open(V2, store, null, watch);                        // the host shows the new file
+    await settle();
+    ok(E.preview().indexOf('over the quarter. Mine.</p>') !== -1, 'the edit carried over, with no question');
+    eq(E.outsideChanges().length, 2, 'and the other tool\u2019s changes are shown');
+  }
+
+  heading('Save does not write over a change it has not seen');
+  {
+    const store = memoryStore();
+    let onDisk = V1, written = 0;
+    const watch = { read: () => Promise.resolve(onDisk), bringIn: () => {} };
+    open(V1, store, (text) => { written++; onDisk = text; return Promise.resolve({ ok: true, inPlace: true, where: 'Saved' }); }, watch);
+    await settle();
+    type(island('#a'), ' One.');
+    await E.save();
+    eq(written, 1, 'an ordinary save writes');
+    eq(await E.checkDisk(), false, 'and its own save is not mistaken for someone else\u2019s change');
+    onDisk = V2;
+    type(island('#a'), ' Two.');
+    await E.save();
+    eq(written, 1, 'with the file changed outside, Save stops and asks');
+    await E.save({ force: true });
+    eq(written, 2, 'Save anyway writes');
   }
 
   heading('the same file again: edits come back where they were');
@@ -269,7 +355,7 @@ async function run() {
     const store = memoryStore();
     // A host that "saves" by keeping the text.
     let written = null;
-    open(V1, store, (text) => { written = text; return Promise.resolve({ ok: true, where: 'Saved' }); });
+    open(V1, store, (text) => { written = text; return Promise.resolve({ ok: true, inPlace: true, where: 'Saved' }); });
     await settle();
     type(island('#a'), ' Saved edit.');
     await E.save();
