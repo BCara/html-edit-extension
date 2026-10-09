@@ -14,6 +14,9 @@
 #
 #   ./build-app.sh            -> dist/
 #   ./build-app.sh somewhere  -> somewhere/
+#   BRAND=stetproof ./build-app.sh somewhere
+#                             -> the same app under another brand, from
+#                                sites/brands/<BRAND>/brand.json
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,6 +63,15 @@ for f in "$OUT/index.html" "$OUT/sw.js" "$OUT/manifest.webmanifest"; do
     "$f"
 done
 
+# Another brand: names, manifest, colours and icons. Before the checks and the
+# tests below, so it is the branded bundle that gets verified.
+BRAND_JSON=""
+if [ -n "${BRAND:-}" ]; then
+  BRAND_JSON="$DIR/sites/brands/$BRAND/brand.json"
+  [ -f "$BRAND_JSON" ] || { echo "build-app.sh: no brand $BRAND ($BRAND_JSON)" >&2; exit 1; }
+  node "$DIR/sites/brand-app.js" "$BRAND_JSON" "$OUT"
+fi
+
 # Nothing may still point outside the bundle, or it will 404 on a static host.
 if grep -rn '\.\./' "$OUT/index.html" "$OUT/sw.js" "$OUT/manifest.webmanifest"; then
   echo "build-app.sh: a path still escapes the bundle (above)" >&2
@@ -84,6 +96,7 @@ if [ "${SKIP_VERIFY:-}" != "1" ]; then
     cp "$DIR/app/test/app-test.html" "$OUT/test/"
     cp "$DIR/test/report.js" "$OUT/test/"
     sed -i 's|\.\./\.\./test/report\.js|report.js|' "$OUT/test/app-test.html"
+    [ -z "$BRAND_JSON" ] || node "$DIR/sites/brand-app.js" "$BRAND_JSON" --files "$OUT/test/app-test.html"
 
     VPORT=8477
     node -e '

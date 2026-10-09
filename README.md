@@ -594,3 +594,29 @@ server/                 optional: save-in-place for a static file server
 src/popup/              toolbar popup and the file-access diagnostic
 test/                   fixtures, suites, and the preservation procedure
 ```
+
+## The promotional sites
+
+The product is sold under two names, VibeRevise and StetProof, from this one
+codebase. Each brand gets its own static site with the web app inside it:
+
+```
+./build-sites.sh               # every brand -> out/<brand>/
+./build-sites.sh stetproof     # one brand
+```
+
+Each `out/<brand>/` is plain static files: the landing page at `/`, the privacy
+policy at `/privacy.html` and the app at `/app/`. To put them on two domains,
+make one Cloudflare Pages (or Netlify) project per brand from this repository,
+with build command `./build-sites.sh <brand>` and output directory
+`out/<brand>`, then attach each brand's domain to its project.
+
+- `sites/brands/<brand>/brand.json`: name, domain, colours, the landing-page
+  copy that differs between brands, and `chromeStoreUrl` (null shows "Coming
+  soon"; set it once the extension is published).
+- `sites/build-site.js`: the landing page and the copy both brands share
+  (AI modes, pricing, FAQ). The privacy page is `store/PRIVACY.md` under the
+  brand's name.
+- `sites/brand-app.js`: renames and recolours the built app for a brand.
+  The saved-file format carries no brand name, so a file edited under one
+  brand opens cleanly under the other.

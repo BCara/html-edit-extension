@@ -1,0 +1,120 @@
+{
+  "slug": "stetproof",
+  "name": "StetProof",
+  "domain": "stetproof.com",
+  "chromeStoreUrl": null,
+  "contact": null,
+  "appName": "StetProof — AI in the margin, you have the final say",
+  "appDescription": "Edit the words of an HTML document yourself, with AI that suggests and never takes over.",
+  "colours": {
+    "light": {
+      "paper": "#fbf8f2",
+      "panel": "#ffffff",
+      "ink": "#1d1a17",
+      "muted": "#6b635a",
+      "line": "#e7dfd2",
+      "accent": "#a3201d",
+      "accent2": "#a3201d",
+      "accentInk": "#ffffff",
+      "tint": "#f6e7e2"
+    },
+    "dark": {
+      "paper": "#16120f",
+      "panel": "#201b17",
+      "ink": "#efe8dc",
+      "muted": "#b0a698",
+      "line": "#3a322b",
+      "accent": "#f0897c",
+      "accent2": "#f0897c",
+      "accentInk": "#1a0f0d",
+      "tint": "#3a1e1a"
+    }
+  },
+  "fonts": {
+    "display": "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, \"Book Antiqua\", Georgia, serif",
+    "body": "system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif"
+  },
+  "site": {
+    "title": "StetProof — AI in the margin, you have the final say",
+    "description": "A careful editor for HTML documents. Fix the wording yourself; AI explains, reviews and suggests, and nothing changes unless you make it change.",
+    "eyebrow": "stet · Latin, “let it stand”",
+    "heroTitle": "AI in the margin.<br>You have the final say.",
+    "heroLede": "StetProof is a careful editor for HTML documents. Fix the wording yourself, ask AI to explain, review or suggest — and nothing in your document changes unless you make it change.",
+    "demo": "stet",
+    "painsTitle": "For people who want AI’s help, not its voice",
+    "pains": [
+      {
+        "title": "Slop lands on your desk",
+        "body": "A colleague’s AI-written report reads like everyone else’s, and it’s yours to make right before it goes out."
+      },
+      {
+        "title": "“Make it better” rewrites everything",
+        "body": "Ask AI to improve one line and it changes five, including the ones you liked."
+      },
+      {
+        "title": "You can’t see what it touched",
+        "body": "After a regenerate, nobody can say which sentences are new, and reading the whole thing again is the only check."
+      }
+    ],
+    "featuresTitle": "Your words stand until you change them",
+    "features": [
+      {
+        "icon": "✎",
+        "title": "Edit by hand, right on the page",
+        "body": "Click any text and type, with bold, italic, bullets and new paragraphs. The file you save is the one you opened with only your changes in it."
+      },
+      {
+        "icon": "✦",
+        "title": "AI that advises, not edits",
+        "body": "Ask AI to explain a passage, review the document, suggest a rewrite or reply to a comment, using your own key. In Read mode, the default, it can’t change a word."
+      },
+      {
+        "icon": "✓",
+        "title": "You accept every change",
+        "body": "Switch AI to Read and write and its suggestions get an Accept button. Nothing is applied until you press it."
+      },
+      {
+        "icon": "☰",
+        "title": "Every change, and who made it",
+        "body": "A list shows each edit with its author: you, a colleague, or the AI and its model. Undo any one of them on its own."
+      },
+      {
+        "icon": "Δ",
+        "title": "See what changed outside",
+        "body": "If another tool rewrites the file while you work, its changes are highlighted for review and your unsaved edits are kept."
+      },
+      {
+        "icon": "💬",
+        "title": "Margin notes in the file",
+        "body": "Comments sit in the margin and are saved inside the HTML file, so your review travels with the document."
+      }
+    ],
+    "stepsTitle": "How it works",
+    "steps": [
+      {
+        "title": "Open the document",
+        "body": "Open an HTML file from your computer or a server on your network."
+      },
+      {
+        "title": "Read it with AI beside you",
+        "body": "Ask for an explanation, a review or a suggested rewrite. It appears beside your text, not in it."
+      },
+      {
+        "title": "Make the changes you choose",
+        "body": "Edit by hand or accept a suggestion. Every change is listed, and any of them can be undone."
+      }
+    ],
+    "closingTitle": "Let it stand. Or don’t. It’s your call.",
+    "closingBody": "Free while we’re in beta. Nothing to install for the web app, and no account.",
+    "faqExtra": [
+      {
+        "q": "What does “stet” mean?",
+        "a": "It’s Latin for “let it stand”. Proofreaders write it in the margin, with dots under the words, to say a change should be ignored and the original kept. That’s the idea here: your words stand until you decide otherwise."
+      },
+      {
+        "q": "Can AI edit my document without asking?",
+        "a": "No. In Read mode, the default, AI can explain, review, reply to comments and suggest edits that you copy if you want them. In Read and write mode its suggestions get an Accept button. Either way, nothing changes until you act."
+      }
+    ]
+  }
+}
